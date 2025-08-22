@@ -2,7 +2,7 @@ name: Daily WordPress Post
 
 on:
   schedule:
-    - cron: '33 17 * * *'  # daily at 10:00 AM UTC
+    - cron: '35 15 * * *'  # daily at 10:00 AM UTC
   workflow_dispatch:      # optional manual trigger
 
 jobs:
