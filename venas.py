@@ -21,6 +21,8 @@ soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
+tags_to_add = []
+
 if table:
     tbody = table.find("tbody")
     rows = tbody.find_all("tr") if tbody else []
@@ -36,8 +38,23 @@ if table:
             }
             matches.append(match)
 
+
+
+for match in matches:
+    teams = match["teams"].replace("VS", "|").split("|")
+    for team in teams:
+        team = team.strip()
+        if team:
+            # Original team tag
+            if team not in tags_to_add:
+                tags_to_add.append(team)
+            # "Fixed Matches" variant
+            fixed_tag = f"{team} Fixed Matches"
+            if fixed_tag not in tags_to_add:
+                tags_to_add.append(fixed_tag)
+
 html = """
-<table>
+<table id="free-tip">
     <thead>
         <tr>
             <th>Time</th>
@@ -66,10 +83,30 @@ html += """
 </table>
 """
 
+tag_ids = []
+for tag_name in tags_to_add:
+    response = requests.get(f"https://grabfixedmatch.com/wp-json/wp/v2/tags?search={tag_name}", auth=HTTPBasicAuth(username, app_password))
+    response.raise_for_status()
+    data = response.json()
+    
+    if data:
+        # Tag exists, get its ID
+        tag_ids.append(data[0]["id"])
+    else:
+        # Tag doesn't exist, create it
+        response = requests.post(
+            f"https://grabfixedmatch.com/wp-json/wp/v2/tags",
+            auth=HTTPBasicAuth(username, app_password),
+            json={"name": tag_name}
+        )
+        response.raise_for_status()
+        tag_ids.append(response.json()["id"])
+
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
-    "status": "publish"
+    "status": "publish",
+    "tags": tag_ids
 }
 
 response = requests.post(
@@ -82,5 +119,3 @@ if response.status_code == 201:
     print("Post created successfully!")
 else:
     print("Failed to create post:", response.text)
-
-
