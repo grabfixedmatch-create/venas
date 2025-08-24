@@ -67,7 +67,7 @@ html = """
             <th>Time</th>
             <th>League</th>
             <th>Teams</th>
-            <th>Prediction</th>
+            <th>Tip</th>
             <th style="width: 10%;">Result</th>
         </tr>
     </thead>
