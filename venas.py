@@ -112,7 +112,7 @@ for tag_name in tags_to_add:
         tag_ids.append(response.json()["id"])
 
 # Format date for title
-formatted_date = datetime.now().strftime("%B %d, %Y")
+formatted_date = datetime.now().strftime("%A – %d/%m/%Y")
 
 # Post to WordPress
 post_data = {
