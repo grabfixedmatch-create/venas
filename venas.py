@@ -30,16 +30,22 @@ if table:
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
         if len(cols) == 4:
+            team_text = cols[2]
+
+            # Build Google search link
+            search_query = team_text.replace(" ", "+")
+            result_link = f'<a href="https://www.google.com/search?q={search_query}+result" target="_blank">Check</a>'
+
             match = {
                 "time": cols[0],
                 "league": cols[1],
-                "teams": cols[2],
+                "teams": team_text,
                 "prediction": cols[3],
+                "result": result_link,
             }
             matches.append(match)
 
-
-
+# Collect tags
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
     for team in teams:
@@ -53,6 +59,7 @@ for match in matches:
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
 
+# Build HTML table
 html = """
 <table id="free-tip">
     <thead>
@@ -74,7 +81,7 @@ for m in matches:
             <td>{m['league']}</td>
             <td>{m['teams']}</td>
             <td>{m['prediction']}</td>
-            <td></td>
+            <td>{m['result']}</td>
         </tr>
     """
 
@@ -83,25 +90,31 @@ html += """
 </table>
 """
 
+# Ensure tags exist in WP
 tag_ids = []
 for tag_name in tags_to_add:
-    response = requests.get(f"https://grabfixedmatch.com/wp-json/wp/v2/tags?search={tag_name}", auth=HTTPBasicAuth(username, app_password))
+    response = requests.get(
+        f"https://grabfixedmatch.com/wp-json/wp/v2/tags?search={tag_name}",
+        auth=HTTPBasicAuth(username, app_password)
+    )
     response.raise_for_status()
     data = response.json()
-    
+
     if data:
-        # Tag exists, get its ID
         tag_ids.append(data[0]["id"])
     else:
-        # Tag doesn't exist, create it
         response = requests.post(
-            f"https://grabfixedmatch.com/wp-json/wp/v2/tags",
+            "https://grabfixedmatch.com/wp-json/wp/v2/tags",
             auth=HTTPBasicAuth(username, app_password),
             json={"name": tag_name}
         )
         response.raise_for_status()
         tag_ids.append(response.json()["id"])
 
+# Format date for title
+formatted_date = datetime.now().strftime("%B %d, %Y")
+
+# Post to WordPress
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
@@ -116,6 +129,6 @@ response = requests.post(
 )
 
 if response.status_code == 201:
-    print("Post created successfully!")
+    print("✅ Post created successfully!")
 else:
-    print("Failed to create post:", response.text)
+    print("❌ Failed to create post:", response.text)
