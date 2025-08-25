@@ -1,0 +1,170 @@
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+from requests.auth import HTTPBasicAuth
+from datetime import datetime, timedelta
+import random
+
+wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
+post_id = 397
+username = "pettarr97@gmail.com"
+app_password = "NOfC cNK5 M1le lvvY HfEZ FqhU"
+
+today = datetime.now()
+day_name = today.strftime("%A")
+formatted_date = today.strftime("%A - %d/%m/%Y")
+
+url = "https://redscores.com/football/yesterday-results"
+
+response = requests.get(url)
+response.raise_for_status()
+
+soup = BeautifulSoup(response.text, "html.parser")
+
+table = soup.find_all("table", class_="table-data__table table-data__table wide animate-collapsing")
+
+rows = soup.find_all("tr", class_="table-data__stats-parent")
+filtered_rows = []
+
+for row in rows:
+    # Look inside each row for a <div style="font-weight: bold;">
+    bold_div = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
+    if bold_div:
+        filtered_rows.append(row)
+
+first_row = filtered_rows[0]
+
+for row in rows:
+    # Look inside each row for a <div style="font-weight: bold;">
+    bold_div = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
+    if bold_div:
+        filtered_rows.append(row)
+
+# Extract structured data
+matches = []
+for row in filtered_rows:
+    # --- game name ---
+    teams = [span.get_text(strip=True) for span in row.select("span.team")]
+    game_name = f"{teams[0]} - {teams[1]}" if len(teams) >= 2 else None
+
+    # --- score ---
+    score_tag = row.select_one("span.colored-value--score")
+    score = score_tag.get_text(strip=True) if score_tag else None
+
+    # --- winner odd ---
+    winner_odd_tag = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
+    winner_odd = winner_odd_tag.get_text(strip=True) if winner_odd_tag else None
+
+    matches.append({
+        "game": game_name,
+        "score": score,
+        "winner_odd": winner_odd
+    })
+
+valid_matches = []
+for m in matches:
+    if not m["score"] or not m["winner_odd"]:
+        continue
+    
+    try:
+        home_goals, away_goals = [int(x.strip()) for x in m["score"].split("-")]
+        odd = float(m["winner_odd"])
+    except ValueError:
+        continue  # skip malformed rows
+
+    # Only home win or away win
+    if home_goals == away_goals:
+        continue
+
+    # Odd between 2.30 and 3.50
+    if 2.30 <= odd <= 3.50:
+        valid_matches.append(m)
+
+# Pick one random match
+if valid_matches:
+    random_match = random.choice(valid_matches)
+else:
+    print("No valid matches found")
+
+home_team, away_team = [t.strip() for t in random_match['game'].split(" - ")]
+
+# Split score
+home_goals, away_goals = [int(s.strip()) for s in random_match['score'].split("-")]
+
+raw_score = random_match['score']
+score_clean = raw_score.replace(" ", "")
+
+# Determine tip
+if home_goals > away_goals:
+    tip_text = "1 (Home Win)"
+    winner_side = "home"
+elif away_goals > home_goals:
+    tip_text = "2 (Away Win)"
+    winner_side = "away"
+else:
+    tip_text = "X (Draw)"
+    winner_side = "draw"
+
+# Today’s date
+yesterday = (datetime.today() - timedelta(days=1)).strftime("%d.%m.%Y")
+
+# Build HTML
+html_output = f"""
+<div class="card_wrap">
+    <div class="daily_match">
+        <div class="daily_match_header"><span class="highlighted">{yesterday}</span> &nbsp; MATCH+</div>
+        <div class="daily_match_data">
+            <div class="match">{home_team} vs {away_team}</div>
+            <ul class="match_tip_data">
+                <li>Tip: {tip_text}</li>
+                <li>Odds: {random_match['winner_odd']}</li>
+                <li>Win possibility: 100%</li>
+            </ul>
+        </div>
+        <div class="daily_match_footer">
+            <div class="daily_match_score">{score_clean}</div>
+            <div class="daily_match_score_explanation">The {winner_side} side claimed the win</div>
+        </div>
+    </div>
+</div>
+"""
+
+response = requests.get(f"{wp_url}/{post_id}", auth=HTTPBasicAuth(username, app_password))
+response.raise_for_status()
+post_data = response.json()
+current_content = post_data["content"]["rendered"]  # raw content
+
+container_start = '<div id="daily" class="card_parent card_parent_is--vip">'
+if container_start in current_content:
+    # Insert the new match HTML right after the opening tag
+    new_content = current_content.replace(
+        container_start,
+        container_start + "\n" + html_output
+    )
+else:
+    # Fallback: prepend at the very top if container not found
+    new_content = html_output + "\n" + current_content
+
+update_payload = {
+    "content": new_content
+}
+
+
+response = requests.post(
+    f"{wp_url}/{post_id}",  # include post ID
+    json=update_payload,     # <-- send the updated content here
+    auth=HTTPBasicAuth(username, app_password)
+)
+
+# --- Check response ---
+if response.status_code in [200, 201]:
+    print(f"Post {post_id} updated successfully!")
+    resp_json = response.json()
+    print("Updated post link:", resp_json.get("link"))
+else:
+    print("Failed to update post:", response.status_code)
+    print(response.text)
+# if response.status_code == 201:
+#     print("✅ Post created successfully!")
+# else:
+#     print("❌ Failed to create post:", response.text)
