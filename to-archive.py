@@ -1,5 +1,6 @@
 import requests
 import time
+import re
 from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
@@ -39,49 +40,34 @@ rows = soup.find_all("tr", class_="table-data__stats-parent")
 filtered_rows = []
 
 for row in rows:
-    # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.select_one("span.font-bold.team")
-    if bold_div:
+    bold_span = row.find("span", class_="font-bold")
+    if bold_span:
         filtered_rows.append(row)
 
 first_row = filtered_rows[0]
 
-for row in rows:
-    # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.select_one("span.font-bold.team")
-    if bold_div:
-        filtered_rows.append(row)
-
-
-bold_rows = []
-for i, row in enumerate(rows):
-    bold_div = row.find("span", class_="font-bold")  # update to match actual class
-    if bold_div:
-        bold_rows.append(row)
-        print(f"Row {i+1} has bold span:", bold_div.get_text(strip=True), flush=True)
-
-print(f"Total bold rows found: {len(bold_rows)}", flush=True)
-
 # Extract structured data
 matches = []
 for row in filtered_rows:
-    # --- game name ---
     teams = [span.get_text(strip=True) for span in row.select("span.team")]
     game_name = f"{teams[0]} - {teams[1]}" if len(teams) >= 2 else None
 
-    # --- score ---
     score_tag = row.select_one("span.colored-value--score")
     score = score_tag.get_text(strip=True) if score_tag else None
 
-    # --- winner odd ---
     winner_odd_tag = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
     winner_odd = winner_odd_tag.get_text(strip=True) if winner_odd_tag else None
+
+    if not winner_odd:
+        continue  # skip rows without odds
 
     matches.append({
         "game": game_name,
         "score": score,
         "winner_odd": winner_odd
     })
+
+print('Matches: ', matches)
 
 valid_matches = []
 for m in matches:
@@ -101,6 +87,8 @@ for m in matches:
     # Odd between 2.30 and 3.50
     if 2.30 <= odd <= 3.50:
         valid_matches.append(m)
+
+print(valid_matches)
 
 # Pick one random match
 if valid_matches:
