@@ -1,4 +1,5 @@
 import requests
+import time
 from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
@@ -10,14 +11,25 @@ post_id = 397
 username = "pettarr97@gmail.com"
 app_password = "NOfC cNK5 M1le lvvY HfEZ FqhU"
 
+def fetch_with_retries(url, retries=5, delay=5):
+    """Fetch URL with retries and delay in case the content is not ready."""
+    for i in range(retries):
+        response = requests.get(url, timeout=20)
+        if response.status_code == 200 and "table-data__table" in response.text:
+            return response
+        print(f"⚠️ Attempt {i+1} failed, retrying in {delay} sec...")
+        time.sleep(delay)
+    response.raise_for_status()
+    return response
+
+
 today = datetime.now()
 day_name = today.strftime("%A")
 formatted_date = today.strftime("%A - %d/%m/%Y")
 
 url = "https://redscores.com/football/yesterday-results"
 
-response = requests.get(url)
-response.raise_for_status()
+response = fetch_with_retries(url, retries=5, delay=10)
 
 soup = BeautifulSoup(response.text, "html.parser")
 
