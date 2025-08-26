@@ -85,6 +85,7 @@ if valid_matches:
     random_match = random.choice(valid_matches)
 else:
     print("No valid matches found")
+    exit(0)
 
 home_team, away_team = [t.strip() for t in random_match['game'].split(" - ")]
 
