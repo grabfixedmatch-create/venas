@@ -23,6 +23,20 @@ def fetch_with_retries(url, retries=5, delay=5):
     response.raise_for_status()
     return response
 
+def american_to_decimal(odd):
+    """Convert American odds to decimal odds."""
+    odd = str(odd).replace(",", "").strip()
+    if odd in ["-", ""]:
+        return None
+    try:
+        odd = int(odd)
+    except ValueError:
+        return None
+    if odd > 0:
+        return round((odd / 100) + 1, 2)
+    else:
+        return round((100 / abs(odd)) + 1, 2)
+
 
 today = datetime.now()
 day_name = today.strftime("%A")
@@ -56,10 +70,14 @@ for row in filtered_rows:
     score = score_tag.get_text(strip=True) if score_tag else None
 
     winner_odd_tag = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
-    winner_odd = winner_odd_tag.get_text(strip=True) if winner_odd_tag else None
+    winner_odd_raw = winner_odd_tag.get_text(strip=True) if winner_odd_tag else None
 
-    if not winner_odd:
+    if not winner_odd_raw:
         continue  # skip rows without odds
+
+    winner_odd = american_to_decimal(winner_odd_raw)
+    if winner_odd is None:
+        continue  # skip rows that could not be converted
 
     matches.append({
         "game": game_name,
@@ -88,7 +106,7 @@ for m in matches:
     if 2.30 <= odd <= 3.50:
         valid_matches.append(m)
 
-print(valid_matches)
+print ('valid mathces', matches)
 
 # Pick one random match
 if valid_matches:
