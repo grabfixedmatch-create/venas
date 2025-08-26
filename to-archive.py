@@ -52,6 +52,16 @@ for row in rows:
     if bold_div:
         filtered_rows.append(row)
 
+
+bold_rows = []
+for i, row in enumerate(rows):
+    bold_div = row.find("span", class_="font-bold")  # update to match actual class
+    if bold_div:
+        bold_rows.append(row)
+        print(f"Row {i+1} has bold span:", bold_div.get_text(strip=True), flush=True)
+
+print(f"Total bold rows found: {len(bold_rows)}", flush=True)
+
 # Extract structured data
 matches = []
 for row in filtered_rows:
