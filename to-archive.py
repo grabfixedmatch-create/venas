@@ -38,14 +38,9 @@ table = soup.find_all("table", class_="table-data__table table-data__table wide 
 rows = soup.find_all("tr", class_="table-data__stats-parent")
 filtered_rows = []
 
-for i, row in enumerate(rows[:3]):  # show only first 3 rows
-    print("---- Row sample ----", flush=True)
-    print(row.prettify()[:1000], flush=True)  # only first 1000 chars for readability
-
-
 for row in rows:
     # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.select_one("div[style*='font-weight: bold'], span.font-bold, div.font-bold")
+    bold_div = row.select_one("span.font-bold.team")
     if bold_div:
         filtered_rows.append(row)
 
@@ -53,7 +48,7 @@ first_row = filtered_rows[0]
 
 for row in rows:
     # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.select_one("div[style*='font-weight: bold'], span.font-bold, div.font-bold")
+    bold_div = row.select_one("span.font-bold.team")
     if bold_div:
         filtered_rows.append(row)
 
