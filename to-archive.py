@@ -38,12 +38,6 @@ table = soup.find_all("table", class_="table-data__table table-data__table wide 
 rows = soup.find_all("tr", class_="table-data__stats-parent")
 filtered_rows = []
 
-print(f"Found {len(rows)} total rows")
-print(f"Found {len(filtered_rows)} rows with bold div")
-print("Sample row HTML:\n", filtered_rows[0].prettify() if filtered_rows else "No rows")
-
-print(f"Found {len(rows)} total rows", flush=True)
-
 for i, row in enumerate(rows[:3]):  # show only first 3 rows
     print("---- Row sample ----", flush=True)
     print(row.prettify()[:1000], flush=True)  # only first 1000 chars for readability
@@ -51,7 +45,7 @@ for i, row in enumerate(rows[:3]):  # show only first 3 rows
 
 for row in rows:
     # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
+    bold_div = row.select_one("div[style*='font-weight: bold'], span.font-bold, div.font-bold")
     if bold_div:
         filtered_rows.append(row)
 
@@ -59,7 +53,7 @@ first_row = filtered_rows[0]
 
 for row in rows:
     # Look inside each row for a <div style="font-weight: bold;">
-    bold_div = row.find("div", style=lambda v: v and "font-weight: bold;" in v)
+    bold_div = row.select_one("div[style*='font-weight: bold'], span.font-bold, div.font-bold")
     if bold_div:
         filtered_rows.append(row)
 
