@@ -2,7 +2,7 @@ name: Daily Archive Post Update
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # daily at 04:00 AM UTC
+    - cron: '0 11 * * *'  # daily at 13:00 PM UTC
   workflow_dispatch:      # optional manual trigger
 
 jobs:
