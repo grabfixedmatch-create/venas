@@ -1,39 +1,31 @@
-import requests
-import time
-import re
+import cloudscraper
 from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
-from datetime import datetime, timedelta
-import random
-from requests_html import HTMLSession
+import os
 
-username = "pettarr97@gmail.com"
-app_password = "NOfC cNK5 M1le lvvY HfEZ FqhU"
-
-
+# ---------------- CONFIG ----------------
 today = datetime.now()
-day_name = today.strftime("%A")
 formatted_date = today.strftime("%A - %d/%m/%Y")
 
+# WordPress credentials from environment variables
+username = os.environ.get("WP_USERNAME")
+app_password = os.environ.get("WP_APP_PASSWORD")
+
+if not username or not app_password:
+    raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
+
+# ---------------- SCRAPE BANKER OF THE DAY ----------------
 url = "https://bankerpredict.com/banker-of-the-day"
+scraper = cloudscraper.create_scraper()  # bypass Cloudflare
+html = scraper.get(url).text
 
-session = HTMLSession()
-r = session.get(url, headers={
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/120.0.0.0 Safari/537.36"
-})
-
-# Render JavaScript
-r.html.render(wait=3, timeout=20)
-
-soup = BeautifulSoup(r.html.html, "html.parser")
-
+soup = BeautifulSoup(html, "html.parser")
 tables = soup.find_all("table", class_="table table-striped myTableSmall")
+
 if len(tables) < 2:
     print("Error: Table not found. Check HTML snippet:")
-    print(r.html.html[:1000])
+    print(html[:1000])
     exit()
 
 table = tables[1]
@@ -61,11 +53,10 @@ for row in rows:
 
 # ---------------- FETCH WORDPRESS PAGE ----------------
 wp_url = 'https://grabfixedmatch.com/wp-json/wp/v2/pages?slug=banker-of-the-day'
-
-response_page = requests.get(wp_url, auth=HTTPBasicAuth(username, app_password))
+response_page = scraper.get(wp_url, auth=HTTPBasicAuth(username, app_password))
 
 if response_page.status_code != 200:
-    print("Error fetching page:", response_page.status_code)
+    print("Error fetching WordPress page:", response_page.status_code)
     exit()
 
 page_data = response_page.json()
@@ -75,24 +66,25 @@ current_html = page_data[0]['content']['rendered']
 soup_wp = BeautifulSoup(current_html, "html.parser")
 wp_table = soup_wp.find("table", {"id": "free-tip"})
 
-if wp_table:
-    tbody = wp_table.find("tbody")
-    new_rows = BeautifulSoup(output_rows, "html.parser")
+if not wp_table:
+    print("Error: Table with id 'free-tip' not found in WordPress page.")
+    exit()
 
-    # Insert new rows at the top
-    for new_row in reversed(new_rows.find_all("tr")):
-        tbody.insert(0, new_row)
+# Insert new rows at the top of the table body
+tbody = wp_table.find("tbody")
+new_rows = BeautifulSoup(output_rows, "html.parser")
 
-    updated_html = str(soup_wp)
+for new_row in reversed(new_rows.find_all("tr")):
+    tbody.insert(0, new_row)
 
-    # ---------------- UPDATE WORDPRESS PAGE ----------------
-    update_url = f'https://grabfixedmatch.com/wp-json/wp/v2/pages/{page_id}'
-    data = {"content": updated_html}
-    response_update = requests.post(update_url, auth=HTTPBasicAuth(username, app_password), json=data)
+updated_html = str(soup_wp)
 
-    if response_update.status_code == 200:
-        print("Page updated successfully ✅")
-    else:
-        print("Error updating page:", response_update.status_code, response_update.text)
+# ---------------- UPDATE WORDPRESS PAGE ----------------
+update_url = f'https://grabfixedmatch.com/wp-json/wp/v2/pages/{page_id}'
+import requests
+response_update = requests.post(update_url, auth=HTTPBasicAuth(username, app_password), json={"content": updated_html})
+
+if response_update.status_code == 200:
+    print("WordPress page updated successfully ✅")
 else:
-    print("Table with id 'free-tip' not found in page.")
+    print("Error updating page:", response_update.status_code, response_update.text)
