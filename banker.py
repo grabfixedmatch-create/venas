@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 import os
+import requests
 
 # ---------------- CONFIG ----------------
 today = datetime.now()
@@ -35,7 +36,8 @@ rows = table.find("tbody").find_all("tr")
 output_rows = ""
 for row in rows:
     cols = row.find_all("td")
-    time = cols[0].get_text(strip=True)
+    # Instead of using scraped time, show today's date
+    date_str = today.strftime("%d.%m.%Y")
     league = cols[1].get_text(strip=True)
     match = cols[2].get_text(" ", strip=True)
     tip = cols[3].get_text(strip=True).upper()  # Tip in uppercase
@@ -43,7 +45,7 @@ for row in rows:
     search_url = f"https://www.google.com/search?q={match.replace(' ', '+')}+result"
     output_rows += f"""
 <tr>
-    <td>{time}</td>
+    <td>{date_str}</td>
     <td>{league}</td>
     <td>{match}</td>
     <td>{tip}</td>
@@ -81,7 +83,6 @@ updated_html = str(soup_wp)
 
 # ---------------- UPDATE WORDPRESS PAGE ----------------
 update_url = f'https://grabfixedmatch.com/wp-json/wp/v2/pages/{page_id}'
-import requests
 response_update = requests.post(update_url, auth=HTTPBasicAuth(username, app_password), json={"content": updated_html})
 
 if response_update.status_code == 200:
