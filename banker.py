@@ -28,7 +28,7 @@ if len(tables) < 2:
     print(html[:1000])
     exit()
 
-table = tables[1]
+table = tables[0]
 
 # Extract rows
 rows = table.find("tbody").find_all("tr")
