@@ -1,0 +1,29 @@
+name: Over 2.5 Goals Soccer Predictions
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # daily at 09:00 UTC
+  workflow_dispatch:      # optional manual trigger
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cloudscraper beautifulsoup4 requests
+
+      - name: Run scraper
+        run: python over25.py
+        env:
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
