@@ -2,7 +2,7 @@ name: Banker of the day
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # daily at 09:00 UTC
+    - cron: '0 8 * * *'  # daily at 09:00 UTC
   workflow_dispatch:      # optional manual trigger
 
 jobs:
