@@ -17,7 +17,7 @@ if not username or not app_password:
     raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
 
 # ---------------- SCRAPE BANKER OF THE DAY ----------------
-url = "https://zakabet.com/banker/?dt=2025-09-03"
+url = "https://zakabet.com/banker/"
 scraper = cloudscraper.create_scraper()  # bypass Cloudflare
 html = scraper.get(url).text
 
