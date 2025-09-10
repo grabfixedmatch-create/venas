@@ -101,7 +101,7 @@ html_table = """
             <th>Date</th>
             <th>Match</th>
             <th>Tip</th>
-            <th>Result</th>
+            <th>FT</th>
         </tr>
     </thead>
     <tbody>
