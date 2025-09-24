@@ -26,4 +26,4 @@ jobs:
         run: python footy_tips.py
         env:
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
-          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD_FOOTY }}
+          WP_APP_PASSWORD_FOOTY: ${{ secrets.WP_APP_PASSWORD_FOOTY }}
