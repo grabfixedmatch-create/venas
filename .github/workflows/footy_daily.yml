@@ -25,5 +25,5 @@ jobs:
       - name: Run scraper
         run: python footy_tips.py
         env:
-          WP_USERNAME: ${{ secrets.WP_USERNAME }}
-          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD_FOOTY }}
+          WP_USERNAME: "pettarr97@gmail.com"
+          WP_APP_PASSWORD: "Drzj RwZt kqgj pjgg Q6WT omhE"
