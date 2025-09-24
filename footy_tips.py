@@ -11,8 +11,8 @@ today = datetime.now()
 formatted_date = today.strftime("%d.%m.%Y")
 
 # WordPress credentials from environment variables
-username = "pettarr97@gmail.com"
-app_password = "Drzj RwZt kqgj pjgg Q6WT omhE"
+username = os.environ.get("WP_USERNAME")
+app_password = os.environ.get("WP_APP_PASSWORD_FOOTY")
 
 # if not username or not app_password:
 #     raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
