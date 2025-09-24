@@ -11,11 +11,11 @@ today = datetime.now()
 formatted_date = today.strftime("%d.%m.%Y")
 
 # WordPress credentials from environment variables
-username = os.environ.get("WP_USERNAME")
-app_password = os.environ.get("WP_APP_PASSWORD_FOOTY")
+username = "pettarr97@gmail.com"
+app_password = "Drzj RwZt kqgj pjgg Q6WT omhE"
 
-if not username or not app_password:
-    raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
+# if not username or not app_password:
+#     raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
 
 url = "https://tipsbet.co.uk/"
 scraper = cloudscraper.create_scraper()  # bypass Cloudflare
