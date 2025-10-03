@@ -6,6 +6,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import os
 
+# ---------------- CONFIG ----------------
 URL = "https://www.soccersite.com/yesterday-football-predictions"
 WP_URL = "https://footy1x2.info/wp-json/wp/v2/posts"
 POST_ID = 77
@@ -15,6 +16,7 @@ APP_PASSWORD = os.environ.get("WP_APP_PASSWORD_FOOTY")
 if not USERNAME or not APP_PASSWORD:
     raise ValueError("WP_USERNAME and WP_APP_PASSWORD_FOOTY must be set in environment variables.")
 
+# ---------------- SCRAPING ----------------
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page()
@@ -23,6 +25,7 @@ with sync_playwright() as p:
     html = page.content()
     browser.close()
 
+# ---------------- PARSING ----------------
 soup = BeautifulSoup(html, "html.parser")
 matches_data = []
 
@@ -69,14 +72,13 @@ for grid in predictions:
                 'result': result
             })
 
+# ---------------- SELECT MATCHES ----------------
 num_matches = 2 if random.randint(1, 10) <= 9 else 1
-
 win_matches = [m for m in matches_data if m['result'] == 'WIN']
 lose_matches = [m for m in matches_data if m['result'] == 'LOSE']
 
 selected_matches = []
 for _ in range(num_matches):
-    # 80% chance to pick WIN, 20% chance to pick LOSE
     if lose_matches and random.random() < 0.2:
         selected = random.choice(lose_matches)
         lose_matches.remove(selected)
@@ -91,7 +93,18 @@ for _ in range(num_matches):
 formatted_rows = []
 for match in selected_matches:
     home, away = match['home_team'], match['away_team']
-    tip, result = match['predicted_tip'], match['result']
+    tip_raw, result = match['predicted_tip'], match['result']
+
+    # Show team names in Tip column
+    if tip_raw == '1':
+        tip_text = home
+    elif tip_raw == '2':
+        tip_text = away
+    elif tip_raw.upper() == 'X':
+        tip_text = "Draw"
+    else:
+        tip_text = tip_raw
+
     formatted_rows.append(f"""
 <tr>
     <td>{datetime.strptime(match['date'], '%Y-%m-%d %H:%M').strftime('%d.%m.%Y')}</td>
@@ -100,11 +113,12 @@ for match in selected_matches:
         <div>vs</div>
         <div>{away}</div>
     </td>
-    <td>{tip}</td>
+    <td>{tip_text}</td>
     <td><span class="{'win' if result=='WIN' else 'lose'}">{result}</span></td>
 </tr>
 """)
 
+# ---------------- FETCH WORDPRESS POST ----------------
 response = requests.get(f"{WP_URL}/{POST_ID}", auth=HTTPBasicAuth(USERNAME, APP_PASSWORD))
 if response.status_code != 200:
     raise Exception(f"Failed to fetch post: {response.status_code}")
@@ -121,10 +135,12 @@ tbody = table.find("tbody")
 if not tbody:
     raise Exception("No <tbody> found in the table")
 
+# ---------------- INSERT NEW ROWS AT THE TOP ----------------
 for row_html in reversed(formatted_rows):
     new_row = BeautifulSoup(row_html, "html.parser")
     tbody.insert(0, new_row)
 
+# ---------------- UPDATE WORDPRESS POST ----------------
 updated_html = str(soup)
 update_response = requests.post(
     f"{WP_URL}/{POST_ID}",
