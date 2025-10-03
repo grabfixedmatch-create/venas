@@ -1,0 +1,34 @@
+name: Footy Archive
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 08:00 UTC
+  workflow_dispatch:      # Optional manual trigger
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cloudscraper beautifulsoup4 requests playwright
+
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install
+
+      - name: Run footy tips script
+        run: python footy_archive.py
+        env:
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD_FOOTY: ${{ secrets.WP_APP_PASSWORD_FOOTY }}
