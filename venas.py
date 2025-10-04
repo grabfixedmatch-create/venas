@@ -1,23 +1,26 @@
+import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
+from urllib.parse import quote_plus
+import random
 
+# WordPress credentials
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
 
+# Date for post
 today = datetime.now()
-day_name = today.strftime("%A")
-formatted_date = today.strftime("%A - %d/%m/%Y")
+formatted_date = today.strftime("%A – %d/%m/%Y")
 
+# Scrape fixed match predictions
 url = "https://www.venasbet.com/"
-
 response = requests.get(url)
 response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
-
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
@@ -33,17 +36,16 @@ if table:
             team_text = cols[2]
 
             # Build Google search link
-            search_query = team_text.replace(" ", "+")
-            result_link = f'<a href="https://www.google.com/search?q={search_query}+result" target="_blank">Check</a>'
+            search_query = quote_plus(team_text + " result")
+            result_link = f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>'
 
-            match = {
+            matches.append({
                 "time": cols[0],
                 "league": cols[1],
                 "teams": team_text,
                 "prediction": cols[3],
                 "result": result_link,
-            }
-            matches.append(match)
+            })
 
 # Collect tags
 for match in matches:
@@ -51,13 +53,21 @@ for match in matches:
     for team in teams:
         team = team.strip()
         if team:
-            # Original team tag
             if team not in tags_to_add:
                 tags_to_add.append(team)
-            # "Fixed Matches" variant
             fixed_tag = f"{team} Fixed Matches"
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
+
+# Fetch football links from GitHub txt file
+github_txt_url = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
+response = requests.get(github_txt_url)
+response.raise_for_status()
+all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
+
+# Pick 3 random links
+selected_links = random.sample(all_links, min(3, len(all_links)))
+links_html = "<br>".join(f'<a href="{link}" target="_blank">{link}</a>' for link in selected_links)
 
 # Build HTML table
 html = """
@@ -85,34 +95,35 @@ for m in matches:
         </tr>
     """
 
-html += """
+html += f"""
     </tbody>
 </table>
+<br>
+<h3>Useful Links:</h3>
+{links_html}
 """
 
-# Ensure tags exist in WP
+# Ensure tags exist in WordPress
+session = requests.Session()
 tag_ids = []
 for tag_name in tags_to_add:
-    response = requests.get(
+    resp = session.get(
         f"https://grabfixedmatch.com/wp-json/wp/v2/tags?search={tag_name}",
         auth=HTTPBasicAuth(username, app_password)
     )
-    response.raise_for_status()
-    data = response.json()
+    resp.raise_for_status()
+    data = resp.json()
 
     if data:
         tag_ids.append(data[0]["id"])
     else:
-        response = requests.post(
+        resp = session.post(
             "https://grabfixedmatch.com/wp-json/wp/v2/tags",
             auth=HTTPBasicAuth(username, app_password),
             json={"name": tag_name}
         )
-        response.raise_for_status()
-        tag_ids.append(response.json()["id"])
-
-# Format date for title
-formatted_date = datetime.now().strftime("%A – %d/%m/%Y")
+        resp.raise_for_status()
+        tag_ids.append(resp.json()["id"])
 
 # Post to WordPress
 post_data = {
@@ -122,11 +133,7 @@ post_data = {
     "tags": tag_ids
 }
 
-response = requests.post(
-    wp_url,
-    json=post_data,
-    auth=HTTPBasicAuth(username, app_password)
-)
+response = session.post(wp_url, json=post_data, auth=HTTPBasicAuth(username, app_password))
 
 if response.status_code == 201:
     print("✅ Post created successfully!")
