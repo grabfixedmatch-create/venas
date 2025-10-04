@@ -9,8 +9,8 @@ import random
 
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 post_id = 397
-username = "pettarr97@gmail.com"
-app_password = "NOfC cNK5 M1le lvvY HfEZ FqhU"
+username = os.environ.get("WP_USERNAME")
+app_password = os.environ.get("WP_APP_PASSWORD")
 
 def fetch_with_retries(url, retries=5, delay=5):
     """Fetch URL with retries and delay in case the content is not ready."""
