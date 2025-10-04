@@ -4,8 +4,8 @@ from datetime import datetime
 from requests.auth import HTTPBasicAuth
 
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
-username = "pettarr97@gmail.com"
-app_password = "NOfC cNK5 M1le lvvY HfEZ FqhU"
+username = os.environ.get("WP_USERNAME")
+app_password = os.environ.get("WP_APP_PASSWORD")
 
 today = datetime.now()
 day_name = today.strftime("%A")
