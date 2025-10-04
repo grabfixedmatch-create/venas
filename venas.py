@@ -99,7 +99,7 @@ html += f"""
     </tbody>
 </table>
 <br>
-<h3>Useful Links:</h3>
+<h3 class="links-per-post">Useful Links:</h3>
 {links_html}
 """
 
