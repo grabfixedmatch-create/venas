@@ -15,7 +15,6 @@ app_password = os.environ.get("WP_APP_PASSWORD")
 today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
-# Scrape fixed match predictions
 url = "https://www.venasbet.com/"
 response = requests.get(url)
 response.raise_for_status()
@@ -29,6 +28,9 @@ tags_to_add = []
 if table:
     tbody = table.find("tbody")
     rows = tbody.find_all("tr") if tbody else []
+
+    random.shuffle(rows)
+    rows = rows[:4]
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
@@ -47,7 +49,6 @@ if table:
                 "result": result_link,
             })
 
-# Collect tags
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
     for team in teams:
@@ -59,17 +60,14 @@ for match in matches:
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
 
-# Fetch football links from GitHub txt file
 github_txt_url = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 response = requests.get(github_txt_url)
 response.raise_for_status()
 all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
 
-# Pick 3 random links
 selected_links = random.sample(all_links, min(3, len(all_links)))
 links_html = "<br>".join(f'<a href="{link}" target="_blank">{link}</a>' for link in selected_links)
 
-# Build HTML table
 html = """
 <table id="free-tip">
     <thead>
@@ -125,7 +123,6 @@ for tag_name in tags_to_add:
         resp.raise_for_status()
         tag_ids.append(resp.json()["id"])
 
-# Post to WordPress
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
