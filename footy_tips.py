@@ -12,6 +12,7 @@ formatted_date = today.strftime("%d.%m.%Y")
 
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD_FOOTY")
+category_id = 9  # Free Football Tips and Predictions
 
 # ---------------- SCRAPE FREE TIPS ----------------
 url = "https://tipsbet.co.uk/"
@@ -92,7 +93,8 @@ tags_url = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/f
 titles = requests.get(posts_url).text.splitlines()
 tags_list = requests.get(tags_url).text.splitlines()
 
-post_title = random.choice([t.strip() for t in titles if t.strip()])
+raw_title = random.choice([t.strip() for t in titles if t.strip()])
+post_title = raw_title[0].upper() + raw_title[1:] if raw_title else "Free Tips"
 selected_tags = random.sample([t.strip() for t in tags_list if t.strip()], 5)
 
 # ---------------- ENSURE TAGS EXIST IN WORDPRESS ----------------
@@ -124,7 +126,8 @@ post_data = {
     "title": post_title,
     "content": table_html,
     "status": "publish",
-    "tags": tag_ids
+    "tags": tag_ids,
+    "categories": [category_id]
 }
 
 response = session.post(
