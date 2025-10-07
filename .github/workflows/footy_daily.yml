@@ -1,4 +1,4 @@
-name: Banker of the day
+name: Footy daily tips
 
 on:
   schedule:
