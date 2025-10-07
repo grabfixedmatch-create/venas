@@ -120,11 +120,18 @@ for tag_name in selected_tags:
         resp.raise_for_status()
         tag_ids.append(resp.json()["id"])
 
+# ---------------- CREATE POST CONTENT (SEO STRUCTURE) ----------------
+post_content = f"""
+<h1>{post_title}</h1>
+<p>Latest free football predictions for {today_str}.</p>
+{table_html}
+"""
+
 # ---------------- CREATE NEW WORDPRESS POST ----------------
 wp_url = 'https://footy1x2.info/wp-json/wp/v2/posts'
 post_data = {
     "title": post_title,
-    "content": table_html,
+    "content": post_content,
     "status": "publish",
     "tags": tag_ids,
     "categories": [category_id]
