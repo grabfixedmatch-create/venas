@@ -14,8 +14,8 @@ formatted_date = today.strftime("%d.%m.%Y")
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD_FOOTY")
 
-# if not username or not app_password:
-#     raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
+if not username or not app_password:
+    raise ValueError("WP_USERNAME and WP_APP_PASSWORD must be set in environment variables.")
 
 url = "https://tipsbet.co.uk/"
 scraper = cloudscraper.create_scraper()  # bypass Cloudflare
@@ -76,39 +76,36 @@ for row in selected_rows:
     """
     formatted_rows.append(new_row)
 
-# ---------------- FETCH WORDPRESS PAGE ----------------
-wp_url = 'https://footy1x2.info/wp-json/wp/v2/posts/259'
-response = scraper.get(wp_url, auth=HTTPBasicAuth(username, app_password))
+table_html = f"""
+<table class="tips-table" id="footy-free-tips">
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Match</th>
+            <th>Tip</th>
+            <th>Outcome</th>
+        </tr>
+    </thead>
+    <tbody>
+        {''.join(formatted_rows)}
+    </tbody>
+</table>
+"""
 
-if response.status_code == 200:
-    post_data = response.json()
-    current_content = post_data.get("content", {}).get("rendered", "")
-    
-    soup = BeautifulSoup(current_content, "html.parser")
-    tbody = soup.find("tbody")
+wp_url = 'https://footy1x2.info/wp-json/wp/v2/posts'
+post_data = {
+    "title": f"Free Tips - {formatted_date}",  # you can later pick a random title from file
+    "content": table_html,
+    "status": "publish"
+}
 
-    if tbody:
-        # Append new rows
-        for row_html in reversed(formatted_rows):
-            new_row = BeautifulSoup(row_html, "html.parser")
-            tbody.insert(0, new_row)
-        
-        updated_content = str(soup)
+response = scraper.post(
+    wp_url,
+    auth=HTTPBasicAuth(username, app_password),
+    json=post_data
+)
 
-        update_response = scraper.put(
-            wp_url,
-            auth=HTTPBasicAuth(username, app_password),
-            json={"content": updated_content}
-        )
-        
-        if update_response.status_code == 200:
-            print("Post updated successfully!")
-        else:
-            print("Failed to update post:", update_response.status_code, update_response.text)
-        
-    else:
-        print("No <tbody> found in the post content.")
+if response.status_code in [200, 201]:
+    print("✅ New post created successfully!")
 else:
-    print("Failed to fetch post:", response.status_code, response.text)
-
-
+    print("❌ Failed to create post:", response.status_code, response.text)
