@@ -5,6 +5,8 @@ from requests.auth import HTTPBasicAuth
 import os
 import random
 import requests
+import time
+from random import uniform
 
 # ---------------- CONFIG ----------------
 today = datetime.now()
@@ -86,7 +88,7 @@ table_html = f"""
 </table>
 """
 
-# ---------------- FETCH RANDOM TITLE AND TAGS ----------------
+# ---------------- FETCH TITLES AND TAGS ----------------
 posts_url = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/footy_post_titles_keywords_unique.txt"
 tags_url = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/footy_post_tags_keywords_unique.txt"
 
@@ -95,32 +97,62 @@ tags_list = requests.get(tags_url).text.splitlines()
 
 raw_title = random.choice([t.strip() for t in titles if t.strip()])
 post_title = raw_title[0].upper() + raw_title[1:] if raw_title else "Free Tips"
-selected_tags = random.sample([t.strip() for t in tags_list if t.strip()], 5)
+all_tag_names = list(dict.fromkeys(random.sample([t.strip() for t in tags_list if t.strip()], 5)))
 
-# ---------------- ENSURE TAGS EXIST IN WORDPRESS ----------------
+# ---------------- HELPER: SAFE REQUEST ----------------
+def safe_request(method, url, retries=5, **kwargs):
+    """Retry with exponential backoff for 429 errors."""
+    for attempt in range(retries):
+        resp = requests.request(method, url, **kwargs)
+        if resp.status_code == 429:
+            wait_time = min(120, 5 * (2 ** attempt))  # up to 2 minutes
+            print(f"⚠️ 429 Too Many Requests → Waiting {wait_time}s before retry...")
+            time.sleep(wait_time)
+            continue
+        resp.raise_for_status()
+        return resp
+    raise Exception(f"❌ Failed after {retries} retries: {url}")
+
 session = requests.Session()
-tag_ids = []
 
-for tag_name in selected_tags:
-    resp = session.get(
-        f"https://footy1x2.info/wp-json/wp/v2/tags?search={tag_name}",
+# ---------------- FETCH EXISTING TAGS IN BATCH ----------------
+existing_tags = {}
+page = 1
+while True:
+    resp = safe_request(
+        "GET",
+        "https://footy1x2.info/wp-json/wp/v2/tags",
+        params={"per_page": 100, "page": page},
         auth=HTTPBasicAuth(username, app_password)
     )
-    resp.raise_for_status()
-    data = resp.json()
+    tags = resp.json()
+    if not tags:
+        break
+    for tag in tags:
+        existing_tags[tag["name"]] = tag["id"]
+    page += 1
 
-    if data:
-        tag_ids.append(data[0]["id"])
+# ---------------- CREATE MISSING TAGS ----------------
+tag_ids = []
+for tag_name in all_tag_names:
+    if tag_name in existing_tags:
+        tag_ids.append(existing_tags[tag_name])
     else:
-        resp = session.post(
-            "https://footy1x2.info/wp-json/wp/v2/tags",
-            auth=HTTPBasicAuth(username, app_password),
-            json={"name": tag_name}
-        )
-        resp.raise_for_status()
-        tag_ids.append(resp.json()["id"])
+        try:
+            time.sleep(uniform(1.5, 3.5))
+            resp = safe_request(
+                "POST",
+                "https://footy1x2.info/wp-json/wp/v2/tags",
+                auth=HTTPBasicAuth(username, app_password),
+                json={"name": tag_name}
+            )
+            tag_id = resp.json()["id"]
+            tag_ids.append(tag_id)
+            existing_tags[tag_name] = tag_id
+        except Exception as e:
+            print(f"⚠️ Skipped tag '{tag_name}' due to error: {e}")
 
-# ---------------- CREATE POST CONTENT (SEO STRUCTURE) ----------------
+# ---------------- CREATE POST CONTENT ----------------
 post_content = f"""
 <h1>{post_title}</h1>
 <p>Latest free football predictions for {today_str}.</p>
@@ -128,7 +160,7 @@ post_content = f"""
 """
 
 # ---------------- CREATE NEW WORDPRESS POST ----------------
-wp_url = 'https://footy1x2.info/wp-json/wp/v2/posts'
+wp_url = "https://footy1x2.info/wp-json/wp/v2/posts"
 post_data = {
     "title": post_title,
     "content": post_content,
@@ -137,13 +169,16 @@ post_data = {
     "categories": [category_id]
 }
 
-response = session.post(
-    wp_url,
-    auth=HTTPBasicAuth(username, app_password),
-    json=post_data
-)
-
-if response.status_code in [200, 201]:
-    print("✅ New post created successfully!")
-else:
-    print("❌ Failed to create post:", response.status_code, response.text)
+try:
+    response = safe_request(
+        "POST",
+        wp_url,
+        auth=HTTPBasicAuth(username, app_password),
+        json=post_data
+    )
+    if response.status_code in [200, 201]:
+        print("✅ New post created successfully!")
+    else:
+        print("❌ Failed to create post:", response.status_code, response.text)
+except Exception as e:
+    print(f"❌ Final post error: {e}")
