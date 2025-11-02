@@ -23,7 +23,6 @@ soup = BeautifulSoup(html, "html.parser")
 sections = soup.find_all("section", class_="match-section")
 
 matches = []
-tags_to_add = []
 
 # Filter threshold
 threshold = 74
@@ -92,13 +91,13 @@ html_table += """
 </table>
 """
 
-# ---------------- RETRY HELPERS ----------------
+# ---------------- RETRY HELPER ----------------
 def safe_request(method, url, retries=5, **kwargs):
     """Retry with exponential backoff for 429 errors."""
     for attempt in range(retries):
         resp = requests.request(method, url, **kwargs)
         if resp.status_code == 429:
-            wait_time = min(30, 3 * (2 ** attempt))  # exponential backoff
+            wait_time = min(120, 5 * (2 ** attempt))  # up to 2 minutes
             print(f"⚠️ 429 Too Many Requests → Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
             continue
@@ -106,44 +105,56 @@ def safe_request(method, url, retries=5, **kwargs):
         return resp
     raise Exception(f"❌ Failed after {retries} retries: {url}")
 
-# ---------------- CREATE OR FETCH TAGS ----------------
-tag_ids = []
+# ---------------- COLLECT ALL TAGS ----------------
+all_tag_names = []
 for m in matches:
     t1 = m["team1"]
     t2 = m["team2"]
-    tags_to_add = [
+    all_tag_names.extend([
         f"{t1} vs {t2} BTTS prediction",
         f"{t1} BTTS soccer predictions",
         f"{t2} BTTS soccer predictions"
-    ]
+    ])
 
-    for tag_name in tags_to_add:
+# Remove duplicates
+all_tag_names = list(dict.fromkeys(all_tag_names))
+
+# Fetch all existing tags once (paginated)
+existing_tags = {}
+page = 1
+while True:
+    resp = safe_request(
+        "GET",
+        "https://grabfixedmatch.com/wp-json/wp/v2/tags",
+        params={"per_page": 100, "page": page},
+        auth=HTTPBasicAuth(username, app_password)
+    )
+    tags = resp.json()
+    if not tags:
+        break
+    for tag in tags:
+        existing_tags[tag['name']] = tag['id']
+    page += 1
+
+# ---------------- CREATE MISSING TAGS ----------------
+tag_ids = []
+for tag_name in all_tag_names:
+    if tag_name in existing_tags:
+        tag_ids.append(existing_tags[tag_name])
+    else:
         try:
-            # Random small delay to avoid hitting rate limit too fast
-            time.sleep(uniform(1.5, 3.5))
-
-            # Check if tag exists
-            response = safe_request(
-                "GET",
-                f"https://grabfixedmatch.com/wp-json/wp/v2/tags?search={tag_name}",
-                auth=HTTPBasicAuth(username, app_password)
+            time.sleep(uniform(1.5, 3.5))  # small delay
+            resp = safe_request(
+                "POST",
+                "https://grabfixedmatch.com/wp-json/wp/v2/tags",
+                auth=HTTPBasicAuth(username, app_password),
+                json={"name": tag_name}
             )
-            data = response.json()
-
-            if data:
-                tag_ids.append(data[0]["id"])
-            else:
-                # Create new tag
-                create_resp = safe_request(
-                    "POST",
-                    "https://grabfixedmatch.com/wp-json/wp/v2/tags",
-                    auth=HTTPBasicAuth(username, app_password),
-                    json={"name": tag_name}
-                )
-                tag_ids.append(create_resp.json()["id"])
-
+            tag_id = resp.json()["id"]
+            tag_ids.append(tag_id)
+            existing_tags[tag_name] = tag_id
         except Exception as e:
-            print(f"⚠️ Skipped tag '{tag_name}' due to error: {e}")
+            print(f"⚠️ Skipped creating tag '{tag_name}' due to error: {e}")
 
 # ---------------- POST TO WORDPRESS ----------------
 post_title = f"⚽ BTTS Soccer Predictions - {formatted_date}"
@@ -163,11 +174,9 @@ try:
         json=post_data,
         auth=HTTPBasicAuth(username, app_password)
     )
-
     if response.status_code == 201:
         print("✅ Post created successfully!")
     else:
         print(f"❌ Failed to create post: {response.text}")
-
 except Exception as e:
     print(f"❌ Final post error: {e}")
