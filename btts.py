@@ -5,12 +5,14 @@ from requests.auth import HTTPBasicAuth
 import requests
 import os
 import time
+import json
 from random import uniform
 
 # ---------------- CONFIG ----------------
 today = datetime.now()
 formatted_date = today.strftime("%d.%m.%Y")
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
+tags_url = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
 category_id = 387
@@ -26,6 +28,7 @@ matches = []
 
 # Filter threshold
 threshold = 74
+TAG_CACHE_FILE = "tags_cache.json"
 
 # --------------- SCRAPE MATCHES ---------------
 def extract_matches(threshold):
@@ -45,7 +48,10 @@ def extract_matches(threshold):
             tip_text = tip_elem.get_text(" ", strip=True).replace("Tip:", "").strip().upper() if tip_elem else "N/A"
 
             prob_elem = match.find("p", class_="scores-value")
-            prob = float(prob_elem.get_text(strip=True)) if prob_elem else 0.0
+            try:
+                prob = float(prob_elem.get_text(strip=True))
+            except (ValueError, AttributeError):
+                prob = 0.0
 
             if prob > threshold:
                 search_query = match_name.replace(" ", "+")
@@ -91,21 +97,52 @@ html_table += """
 </table>
 """
 
-# ---------------- RETRY HELPER ----------------
+# ---------------- SAFE REQUEST ----------------
+LAST_REQUEST = 0
 def safe_request(method, url, retries=5, **kwargs):
-    """Retry with exponential backoff for 429 errors."""
+    """Retry with exponential backoff and global rate limit."""
+    global LAST_REQUEST
     for attempt in range(retries):
+        # Throttle all requests (2s gap minimum)
+        since_last = time.time() - LAST_REQUEST
+        if since_last < 2:
+            time.sleep(2 - since_last)
+
         resp = requests.request(method, url, **kwargs)
+        LAST_REQUEST = time.time()
+
         if resp.status_code == 429:
-            wait_time = min(120, 5 * (2 ** attempt))  # up to 2 minutes
+            wait_time = min(120, 5 * (2 ** attempt))
             print(f"⚠️ 429 Too Many Requests → Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
             continue
+        if resp.status_code >= 500:
+            wait_time = 10 * (attempt + 1)
+            print(f"⚠️ Server error {resp.status_code} → retrying in {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+
         resp.raise_for_status()
         return resp
     raise Exception(f"❌ Failed after {retries} retries: {url}")
 
-# ---------------- COLLECT ALL TAGS ----------------
+# ---------------- TAG MANAGEMENT ----------------
+def load_cached_tags():
+    if os.path.exists(TAG_CACHE_FILE):
+        try:
+            with open(TAG_CACHE_FILE, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+def save_cached_tags(tags_dict):
+    with open(TAG_CACHE_FILE, "w") as f:
+        json.dump(tags_dict, f, indent=2)
+
+existing_tags = load_cached_tags()
+
+# Build tag names
 all_tag_names = []
 for m in matches:
     t1 = m["team1"]
@@ -115,50 +152,51 @@ for m in matches:
         f"{t1} BTTS soccer predictions",
         f"{t2} BTTS soccer predictions"
     ])
-
-# Remove duplicates
 all_tag_names = list(dict.fromkeys(all_tag_names))
 
-# Fetch all existing tags once (paginated)
-existing_tags = {}
-page = 1
-while True:
-    resp = safe_request(
-        "GET",
-        "https://grabfixedmatch.com/wp-json/wp/v2/tags",
-        params={"per_page": 100, "page": page},
-        auth=HTTPBasicAuth(username, app_password)
-    )
-    tags = resp.json()
-    if not tags:
-        break
-    for tag in tags:
-        existing_tags[tag['name']] = tag['id']
-    page += 1
-
-# ---------------- CREATE MISSING TAGS ----------------
 tag_ids = []
+
 for tag_name in all_tag_names:
     if tag_name in existing_tags:
         tag_ids.append(existing_tags[tag_name])
-    else:
-        try:
-            time.sleep(uniform(1.5, 3.5))  # small delay
-            resp = safe_request(
-                "POST",
-                "https://grabfixedmatch.com/wp-json/wp/v2/tags",
-                auth=HTTPBasicAuth(username, app_password),
-                json={"name": tag_name}
-            )
-            tag_id = resp.json()["id"]
-            tag_ids.append(tag_id)
+        continue
+
+    # Search the tag before creating
+    try:
+        search_resp = safe_request(
+            "GET",
+            tags_url,
+            params={"search": tag_name},
+            auth=HTTPBasicAuth(username, app_password)
+        )
+        found_tags = search_resp.json()
+        if found_tags:
+            tag_id = found_tags[0]["id"]
             existing_tags[tag_name] = tag_id
-        except Exception as e:
-            print(f"⚠️ Skipped creating tag '{tag_name}' due to error: {e}")
+            tag_ids.append(tag_id)
+            continue
+
+        # Otherwise create it
+        time.sleep(uniform(2.5, 5.0))
+        create_resp = safe_request(
+            "POST",
+            tags_url,
+            auth=HTTPBasicAuth(username, app_password),
+            json={"name": tag_name}
+        )
+        tag_id = create_resp.json()["id"]
+        existing_tags[tag_name] = tag_id
+        tag_ids.append(tag_id)
+        print(f"✅ Created tag: {tag_name}")
+    except Exception as e:
+        print(f"⚠️ Skipped tag '{tag_name}' due to: {e}")
+        continue
+
+# Save updated cache
+save_cached_tags(existing_tags)
 
 # ---------------- POST TO WORDPRESS ----------------
 post_title = f"⚽ BTTS Soccer Predictions - {formatted_date}"
-
 post_data = {
     "title": post_title,
     "content": html_table,
