@@ -5,30 +5,28 @@ from requests.auth import HTTPBasicAuth
 import requests
 import os
 import time
-import json
 from random import uniform
 
 # ---------------- CONFIG ----------------
 today = datetime.now()
 formatted_date = today.strftime("%d.%m.%Y")
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
-tags_url = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
 category_id = 387
 
 url = "https://zakabet.com/both-team-scores-bts-gg"
 scraper = cloudscraper.create_scraper()  # bypass Cloudflare
+
+print("🌍 Fetching match data from:", url)
 html = scraper.get(url).text
 
 soup = BeautifulSoup(html, "html.parser")
 sections = soup.find_all("section", class_="match-section")
 
-matches = []
-
 # Filter threshold
 threshold = 74
-TAG_CACHE_FILE = "tags_cache.json"
+
 
 # --------------- SCRAPE MATCHES ---------------
 def extract_matches(threshold):
@@ -66,9 +64,15 @@ def extract_matches(threshold):
                 })
     return found
 
+
 matches = extract_matches(threshold)
 if not matches:
+    print("⚠️ No matches found above threshold, lowering threshold to 71")
     matches = extract_matches(71)
+
+if not matches:
+    print("❌ No matches found at all, aborting...")
+    exit(0)
 
 # ---------------- BUILD HTML TABLE ----------------
 html_table = """
@@ -97,124 +101,124 @@ html_table += """
 </table>
 """
 
-# ---------------- SAFE REQUEST ----------------
-LAST_REQUEST = 0
-def safe_request(method, url, retries=5, **kwargs):
-    """Retry with exponential backoff and global rate limit."""
-    global LAST_REQUEST
-    for attempt in range(retries):
-        # Throttle all requests (2s gap minimum)
-        since_last = time.time() - LAST_REQUEST
-        if since_last < 2:
-            time.sleep(2 - since_last)
 
-        resp = requests.request(method, url, **kwargs)
-        LAST_REQUEST = time.time()
+# ---------------- RETRY HELPER ----------------
+def safe_request(method, url, retries=5, **kwargs):
+    """Retry with exponential backoff for 429 and timeout errors."""
+    for attempt in range(retries):
+        try:
+            resp = requests.request(method, url, timeout=20, **kwargs)
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Network error: {e}. Waiting 5s before retry...")
+            time.sleep(5)
+            continue
 
         if resp.status_code == 429:
             wait_time = min(120, 5 * (2 ** attempt))
             print(f"⚠️ 429 Too Many Requests → Waiting {wait_time}s before retry...")
             time.sleep(wait_time)
             continue
-        if resp.status_code >= 500:
-            wait_time = 10 * (attempt + 1)
-            print(f"⚠️ Server error {resp.status_code} → retrying in {wait_time}s...")
-            time.sleep(wait_time)
-            continue
 
-        resp.raise_for_status()
-        return resp
-    raise Exception(f"❌ Failed after {retries} retries: {url}")
-
-# ---------------- TAG MANAGEMENT ----------------
-def load_cached_tags():
-    if os.path.exists(TAG_CACHE_FILE):
         try:
-            with open(TAG_CACHE_FILE, "r") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return {}
-    return {}
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Request error: {e}. Waiting 5s before retry...")
+            time.sleep(5)
 
-def save_cached_tags(tags_dict):
-    with open(TAG_CACHE_FILE, "w") as f:
-        json.dump(tags_dict, f, indent=2)
+    # If we reach here, we failed all retries
+    print(f"❌ Giving up on {url} after {retries} retries.")
+    return None
 
-existing_tags = load_cached_tags()
 
-# Build tag names
-all_tag_names = []
-for m in matches:
-    t1 = m["team1"]
-    t2 = m["team2"]
-    all_tag_names.extend([
-        f"{t1} vs {t2} BTTS prediction",
-        f"{t1} BTTS soccer predictions",
-        f"{t2} BTTS soccer predictions"
-    ])
-all_tag_names = list(dict.fromkeys(all_tag_names))
-
+# ---------------- COLLECT TAGS ----------------
 tag_ids = []
 
-for tag_name in all_tag_names:
-    if tag_name in existing_tags:
-        tag_ids.append(existing_tags[tag_name])
-        continue
+try:
+    print("🏷️ Collecting tags...")
+    all_tag_names = []
+    for m in matches:
+        t1 = m["team1"]
+        t2 = m["team2"]
+        all_tag_names.extend([
+            f"{t1} vs {t2} BTTS prediction",
+            f"{t1} BTTS soccer predictions",
+            f"{t2} BTTS soccer predictions"
+        ])
 
-    # Search the tag before creating
-    try:
-        search_resp = safe_request(
+    all_tag_names = list(dict.fromkeys(all_tag_names))
+    existing_tags = {}
+
+    # Fetch all existing tags (paginated)
+    page = 1
+    while True:
+        resp = safe_request(
             "GET",
-            tags_url,
-            params={"search": tag_name},
+            "https://grabfixedmatch.com/wp-json/wp/v2/tags",
+            params={"per_page": 100, "page": page},
             auth=HTTPBasicAuth(username, app_password)
         )
-        found_tags = search_resp.json()
-        if found_tags:
-            tag_id = found_tags[0]["id"]
-            existing_tags[tag_name] = tag_id
-            tag_ids.append(tag_id)
-            continue
+        if not resp:
+            print("⚠️ Skipping tags due to API timeout.")
+            existing_tags = {}
+            tag_ids = []
+            break
 
-        # Otherwise create it
-        time.sleep(uniform(2.5, 5.0))
-        create_resp = safe_request(
-            "POST",
-            tags_url,
-            auth=HTTPBasicAuth(username, app_password),
-            json={"name": tag_name}
-        )
-        tag_id = create_resp.json()["id"]
-        existing_tags[tag_name] = tag_id
-        tag_ids.append(tag_id)
-        print(f"✅ Created tag: {tag_name}")
-    except Exception as e:
-        print(f"⚠️ Skipped tag '{tag_name}' due to: {e}")
-        continue
+        tags = resp.json()
+        if not tags:
+            break
+        for tag in tags:
+            existing_tags[tag['name']] = tag['id']
+        page += 1
 
-# Save updated cache
-save_cached_tags(existing_tags)
+    # Create missing tags
+    for tag_name in all_tag_names:
+        if tag_name in existing_tags:
+            tag_ids.append(existing_tags[tag_name])
+        else:
+            time.sleep(uniform(1.5, 3.5))
+            resp = safe_request(
+                "POST",
+                "https://grabfixedmatch.com/wp-json/wp/v2/tags",
+                auth=HTTPBasicAuth(username, app_password),
+                json={"name": tag_name}
+            )
+            if resp:
+                tag_id = resp.json().get("id")
+                if tag_id:
+                    tag_ids.append(tag_id)
+                    existing_tags[tag_name] = tag_id
+
+except Exception as e:
+    print(f"⚠️ Tag processing failed: {e}")
+    tag_ids = []
+
 
 # ---------------- POST TO WORDPRESS ----------------
 post_title = f"⚽ BTTS Soccer Predictions - {formatted_date}"
+
 post_data = {
     "title": post_title,
     "content": html_table,
     "status": "publish",
     "categories": [category_id],
-    "tags": tag_ids
 }
 
-try:
-    response = safe_request(
-        "POST",
-        wp_url,
-        json=post_data,
-        auth=HTTPBasicAuth(username, app_password)
-    )
-    if response.status_code == 201:
-        print("✅ Post created successfully!")
-    else:
-        print(f"❌ Failed to create post: {response.text}")
-except Exception as e:
-    print(f"❌ Final post error: {e}")
+# Only add tags if they exist
+if tag_ids:
+    post_data["tags"] = tag_ids
+else:
+    print("⚠️ No tags will be added to the post due to previous errors.")
+
+print("📝 Creating WordPress post...")
+response = safe_request(
+    "POST",
+    wp_url,
+    json=post_data,
+    auth=HTTPBasicAuth(username, app_password)
+)
+
+if response and response.status_code == 201:
+    print("✅ Post created successfully!")
+else:
+    print(f"❌ Failed to create post: {response.text if response else 'No response received.'}")
