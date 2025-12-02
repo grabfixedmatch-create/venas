@@ -79,7 +79,7 @@ lose_matches = [m for m in matches_data if m['result'] == 'LOSE']
 
 selected_matches = []
 for _ in range(num_matches):
-    if lose_matches and random.random() < 0.2:
+    if lose_matches and random.random() < 0.1:
         selected = random.choice(lose_matches)
         lose_matches.remove(selected)
     elif win_matches:
