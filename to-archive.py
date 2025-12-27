@@ -1,8 +1,8 @@
-import requests
-import os
+# import requests
+# import os
 import time
 import re
-from bs4 import BeautifulSoup
+# from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 from datetime import datetime, timedelta
