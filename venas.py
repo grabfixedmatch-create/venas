@@ -43,6 +43,15 @@ table = soup.find("table", class_="table table-striped text-center mastro-tips")
 matches = []
 tags_to_add = []
 
+fixed_tags = [
+    "venasbet prediction",
+    "venasbet prediction for today and tomorrow"
+]
+
+for tag in fixed_tags:
+    if tag not in tags_to_add:
+        tags_to_add.append(tag)
+
 if table:
     tbody = table.find("tbody")
     rows = tbody.find_all("tr") if tbody else []
