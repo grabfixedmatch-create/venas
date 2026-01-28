@@ -105,7 +105,7 @@ for m in matches:
             <td>{m['league']}</td>
             <td>{m['teams']}</td>
             <td>{m['prediction']}</td>
-            <td>{m['result']}</td>
+            <td class="">{m['result']}</td>
         </tr>
     """
 html += f"""
