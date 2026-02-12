@@ -3,17 +3,15 @@ import os
 import time
 import re
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from requests.auth import HTTPBasicAuth
+from datetime import datetime, timedelta
 import random
 
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 post_id = 397
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
-
-# ✅ Venasbet category ID
-VENASBET_CATEGORY_ID = 3764
 
 def fetch_with_retries(url, retries=5, delay=5):
     """Fetch URL with retries and delay in case the content is not ready."""
@@ -40,14 +38,18 @@ def american_to_decimal(odd):
     else:
         return round((100 / abs(odd)) + 1, 2)
 
+
 today = datetime.now()
 day_name = today.strftime("%A")
 formatted_date = today.strftime("%A - %d/%m/%Y")
 
 url = "https://redscores.com/football/yesterday-results"
+
 response = fetch_with_retries(url, retries=5, delay=10)
 
 soup = BeautifulSoup(response.text, "html.parser")
+
+table = soup.find_all("table", class_="table-data__table table-data__table wide animate-collapsing")
 
 rows = soup.find_all("tr", class_="table-data__stats-parent")
 filtered_rows = []
@@ -57,13 +59,13 @@ for row in rows:
     if bold_span:
         filtered_rows.append(row)
 
+first_row = filtered_rows[0]
+
+# Extract structured data
 matches = []
 for row in filtered_rows:
     teams = [span.get_text(strip=True) for span in row.select("span.team")]
-    if len(teams) < 2:
-        continue
-
-    game_name = f"{teams[0]} - {teams[1]}"
+    game_name = f"{teams[0]} - {teams[1]}" if len(teams) >= 2 else None
 
     score_tag = row.select_one("span.colored-value--score")
     score = score_tag.get_text(strip=True) if score_tag else None
@@ -72,11 +74,11 @@ for row in filtered_rows:
     winner_odd_raw = winner_odd_tag.get_text(strip=True) if winner_odd_tag else None
 
     if not winner_odd_raw:
-        continue
+        continue  # skip rows without odds
 
     winner_odd = american_to_decimal(winner_odd_raw)
     if winner_odd is None:
-        continue
+        continue  # skip rows that could not be converted
 
     matches.append({
         "game": game_name,
@@ -84,34 +86,45 @@ for row in filtered_rows:
         "winner_odd": winner_odd
     })
 
+print('Matches: ', matches)
+
 valid_matches = []
 for m in matches:
     if not m["score"] or not m["winner_odd"]:
         continue
-
+    
     try:
         home_goals, away_goals = [int(x.strip()) for x in m["score"].split("-")]
         odd = float(m["winner_odd"])
     except ValueError:
-        continue
+        continue  # skip malformed rows
 
+    # Only home win or away win
     if home_goals == away_goals:
         continue
 
+    # Odd between 2.30 and 3.50
     if 2.30 <= odd <= 3.50:
         valid_matches.append(m)
 
-if not valid_matches:
+print ('valid mathces', matches)
+
+# Pick one random match
+if valid_matches:
+    random_match = random.choice(valid_matches)
+else:
     print("No valid matches found")
     exit(0)
 
-random_match = random.choice(valid_matches)
-
 home_team, away_team = [t.strip() for t in random_match['game'].split(" - ")]
+
+# Split score
 home_goals, away_goals = [int(s.strip()) for s in random_match['score'].split("-")]
 
-score_clean = random_match['score'].replace(" ", "")
+raw_score = random_match['score']
+score_clean = raw_score.replace(" ", "")
 
+# Determine tip
 if home_goals > away_goals:
     tip_text = "1 (Home Win)"
     winner_side = "home"
@@ -122,8 +135,10 @@ else:
     tip_text = "X (Draw)"
     winner_side = "draw"
 
+# Today’s date
 yesterday = (datetime.today() - timedelta(days=1)).strftime("%d.%m.%Y")
 
+# Build HTML
 html_output = f"""
 <div class="card_wrap">
     <div class="daily_match">
@@ -144,40 +159,42 @@ html_output = f"""
 </div>
 """
 
-# --- Fetch existing post ---
 response = requests.get(f"{wp_url}/{post_id}", auth=HTTPBasicAuth(username, app_password))
 response.raise_for_status()
 post_data = response.json()
-current_content = post_data["content"]["rendered"]
+current_content = post_data["content"]["rendered"]  # raw content
 
 container_start = '<div id="daily" class="card_parent card_parent_is--vip">'
 if container_start in current_content:
-    new_content = current_content.replace(container_start, container_start + "\n" + html_output)
+    # Insert the new match HTML right after the opening tag
+    new_content = current_content.replace(
+        container_start,
+        container_start + "\n" + html_output
+    )
 else:
+    # Fallback: prepend at the very top if container not found
     new_content = html_output + "\n" + current_content
 
-# --- Preserve existing categories and add Venasbet ---
-existing_categories = post_data.get("categories", [])
-
-if VENASBET_CATEGORY_ID not in existing_categories:
-    existing_categories.append(VENASBET_CATEGORY_ID)
-
 update_payload = {
-    "content": new_content,
-    "categories": existing_categories
+    "content": new_content
 }
 
-# --- Update post ---
+
 response = requests.post(
-    f"{wp_url}/{post_id}",
-    json=update_payload,
+    f"{wp_url}/{post_id}",  # include post ID
+    json=update_payload,     # <-- send the updated content here
     auth=HTTPBasicAuth(username, app_password)
 )
 
+# --- Check response ---
 if response.status_code in [200, 201]:
-    print(f"✅ Post {post_id} updated successfully!")
+    print(f"Post {post_id} updated successfully!")
     resp_json = response.json()
     print("Updated post link:", resp_json.get("link"))
 else:
-    print("❌ Failed to update post:", response.status_code)
+    print("Failed to update post:", response.status_code)
     print(response.text)
+# if response.status_code == 201:
+#     print("✅ Post created successfully!")
+# else:
+#     print("❌ Failed to create post:", response.text)
