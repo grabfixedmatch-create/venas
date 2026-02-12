@@ -14,12 +14,15 @@ wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
 
+# ✅ Venasbet category ID
+VENASBET_CATEGORY_ID = 3764
+
 # --- Setup requests session with retries ---
 def create_session():
     session = requests.Session()
     retries = Retry(
         total=5,
-        backoff_factor=3,  # Wait 3s, then 6s, 12s, etc.
+        backoff_factor=3,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET", "POST"]
     )
@@ -161,7 +164,8 @@ post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
     "status": "publish",
-    "tags": tag_ids
+    "tags": tag_ids,
+    "categories": [VENASBET_CATEGORY_ID]  # ✅ Assign Venasbet category automatically
 }
 
 response = session.post(wp_url, json=post_data, auth=HTTPBasicAuth(username, app_password))
