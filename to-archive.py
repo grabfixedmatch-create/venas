@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
 from datetime import datetime, timedelta
-import random
+# import random
 
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 post_id = 397
