@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import requests
 from requests.auth import HTTPBasicAuth
-import os
+# import os
 
 # ---------------- CONFIG ----------------
 URL = "https://www.soccersite.com/yesterday-football-predictions"
