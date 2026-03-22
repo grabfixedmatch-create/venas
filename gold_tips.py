@@ -32,10 +32,8 @@ for section in sections:
 
         # -------- TEAMS --------
         teams = section.select("div.grid-cols-4 div")
-
         home = teams[0].p.text.strip()
         home_logo = teams[0].img["src"]
-
         away = teams[2].p.text.strip()
         away_logo = teams[2].img["src"]
 
@@ -86,9 +84,7 @@ client = xmlrpc.client.ServerProxy(WP_XMLRPC)
 
 # ---------------- GET POST ----------------
 post = client.wp.getPost(0, USERNAME, PASSWORD, POST_ID)
-
 content = post["post_content"]
-
 soup = BeautifulSoup(content, "html.parser")
 
 table = soup.find("table", id="soccer-predictions-table")
@@ -99,10 +95,15 @@ tbody = table.find("tbody")
 if not tbody:
     raise Exception("No tbody found")
 
-# -------- INSERT NEW ROWS AT TOP (KEEP OLD ROWS) --------
+# -------- INSERT NEW ROWS AFTER HEADER TR --------
+header_tr = tbody.find("tr")
 new_rows = BeautifulSoup(rows_html, "html.parser").find_all("tr")
-for r in reversed(new_rows):  # reversed so first row goes on top
-    tbody.insert(1, r)  # insert after header row
+
+for r in reversed(new_rows):
+    if header_tr:
+        header_tr.insert_after(r)
+    else:
+        tbody.append(r)
 
 updated_content = str(soup)
 
