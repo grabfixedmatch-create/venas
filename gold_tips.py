@@ -1,52 +1,48 @@
-import requests
-from requests.auth import HTTPBasicAuth
-from bs4 import BeautifulSoup
 import cloudscraper
-from datetime import datetime
-import os
+from bs4 import BeautifulSoup
+import xmlrpc.client
 
 # ---------------- CONFIG ----------------
-WP_URL = "https://goldfixedmatches.com/wp-json/wp/v2/posts"
-POST_ID = 207
+WP_XMLRPC = "https://goldfixedmatches.com/xmlrpc.php"
 USERNAME = "admin"
-APP_PASSWORD = "ot23 QCqi HfMW nACD 8SLV SoQK"
+PASSWORD = "ot23 QCqi HfMW nACD 8SLV SoQK"
+POST_ID = 207
 
 SCRAPE_URL = "https://eaglepredict.com/predictions/bet-of-the-day/"
 
-if not USERNAME or not APP_PASSWORD:
-    raise ValueError("Missing WP credentials")
-
-# ---------------- SCRAPING ----------------
+# ---------------- SCRAPE ----------------
 scraper = cloudscraper.create_scraper()
 html = scraper.get(SCRAPE_URL).text
 
 soup = BeautifulSoup(html, "html.parser")
 sections = soup.find_all("div", class_="row-start-1 col-start-1")
 
-rows_html = []
+rows_html = ""
 
 for section in sections:
     try:
-        league = section.select_one(".flex.items-center.gap-2 span").text.strip()
-        time_ = section.select_one(".flex.items-center.gap-2 p").text.strip()
+        # -------- LEAGUE --------
+        league_block = section.select_one(".flex.items-center.gap-2")
+        league = league_block.find("span").text.strip()
+        league_logo = league_block.find("img")["src"]
+
+        # -------- TIME & DATE --------
+        time_ = section.select(".flex.items-center.gap-2 p")[0].text.strip()
         date_ = section.select(".flex.items-center.gap-2 p")[1].text.strip()
 
-        home = section.select("div.grid-cols-4 div")[0].p.text.strip()
-        home_logo = section.select("div.grid-cols-4 div img")[0]["src"]
+        # -------- TEAMS --------
+        teams = section.select("div.grid-cols-4 div")
 
-        away = section.select("div.grid-cols-4 div")[2].p.text.strip()
-        away_logo = section.select("div.grid-cols-4 div img")[2]["src"]
+        home = teams[0].p.text.strip()
+        home_logo = teams[0].img["src"]
 
+        away = teams[2].p.text.strip()
+        away_logo = teams[2].img["src"]
+
+        # -------- TIP --------
         prediction = section.select_one("div.bg-base-300").text.strip()
 
-        # -------- LEAGUE FLAG (simple mapping) --------
-        league_logo = "https://flagcdn.com/w20/un.png"
-        if "Bosnia" in league:
-            league_logo = "https://flagcdn.com/w20/ba.png"
-        elif "South Africa" in league or "Premier Soccer League" in league:
-            league_logo = "https://flagcdn.com/w20/za.png"
-
-        # -------- ROW HTML --------
+        # -------- ROW --------
         row = f"""
 <tr>
     <td>
@@ -77,26 +73,24 @@ for section in sections:
     </td>
 </tr>
 """
-        rows_html.append(row)
+        rows_html += row
+
+        # ---- LIMIT TO 1 MATCH ----
+        break
 
     except Exception as e:
-        print("Skipping:", e)
+        print("Skipping section:", e)
 
-# ---------------- FETCH WORDPRESS POST ----------------
-response = requests.get(
-    f"{WP_URL}/{POST_ID}",
-    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
-)
+# ---------------- XML-RPC CONNECT ----------------
+client = xmlrpc.client.ServerProxy(WP_XMLRPC)
 
-if response.status_code != 200:
-    raise Exception(f"Failed to fetch post: {response.status_code} - {response.text}")
+# ---------------- GET POST ----------------
+post = client.wp.getPost(0, USERNAME, PASSWORD, POST_ID)
 
-post_data = response.json()
-content = post_data.get("content", {}).get("rendered", "")
+content = post["post_content"]
 
 soup = BeautifulSoup(content, "html.parser")
 
-# IMPORTANT: target by ID (your case)
 table = soup.find("table", id="soccer-predictions-table")
 if not table:
     raise Exception("Table not found")
@@ -105,20 +99,22 @@ tbody = table.find("tbody")
 if not tbody:
     raise Exception("No tbody found")
 
-# ---------------- INSERT ROWS AT TOP ----------------
-for row_html in reversed(rows_html):
-    tbody.insert(0, BeautifulSoup(row_html, "html.parser"))
+# -------- INSERT NEW ROWS (APPEND, KEEP OLD ROWS) --------
+new_rows = BeautifulSoup(rows_html, "html.parser").find_all("tr")
+for r in new_rows:
+    tbody.append(r)
+
+updated_content = str(soup)
 
 # ---------------- UPDATE POST ----------------
-updated_html = str(soup)
-
-update_response = requests.post(
-    f"{WP_URL}/{POST_ID}",
-    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
-    json={"content": updated_html}
+client.wp.editPost(
+    0,
+    USERNAME,
+    PASSWORD,
+    POST_ID,
+    {
+        "post_content": updated_content
+    }
 )
 
-if update_response.status_code == 200:
-    print("Post updated successfully!")
-else:
-    print("Update failed:", update_response.status_code, update_response.text)
+print("✅ Post updated successfully via XML-RPC!")
