@@ -1,4 +1,4 @@
-name: Footy Archive
+name: Gold tips
 
 on:
   schedule:
@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m playwright install
 
-      - name: Run footy tips script
+      - name: Run gold tips script
         run: python gold_tips.py
         env:
           WP_USERNAME: ${{ secrets.WP_USERNAME }}
