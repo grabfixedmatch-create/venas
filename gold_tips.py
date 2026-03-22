@@ -99,10 +99,10 @@ tbody = table.find("tbody")
 if not tbody:
     raise Exception("No tbody found")
 
-# -------- INSERT NEW ROWS (APPEND, KEEP OLD ROWS) --------
+# -------- INSERT NEW ROWS AT TOP (KEEP OLD ROWS) --------
 new_rows = BeautifulSoup(rows_html, "html.parser").find_all("tr")
-for r in new_rows:
-    tbody.append(r)
+for r in reversed(new_rows):  # reversed so first row goes on top
+    tbody.insert(1, r)  # insert after header row
 
 updated_content = str(soup)
 
