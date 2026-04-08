@@ -18,8 +18,8 @@ WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
-YOUCOM_API_KEY = os.environ.get("OPENAI_API_KEY")
 
+# ✅ MULTIPLE CATEGORY IDS
 CATEGORY_IDS = [3764, 3886]
 
 # ==============================
@@ -52,6 +52,7 @@ formatted_date = today.strftime("%A – %d/%m/%Y")
 # ==============================
 
 VENASBET_URL = "https://www.venasbet.com/"
+
 response = session.get(VENASBET_URL)
 response.raise_for_status()
 
@@ -60,7 +61,13 @@ table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
 tags_to_add = []
-fixed_tags = ["venasbet prediction", "venasbet prediction for today and tomorrow"]
+
+# Fixed SEO Tags
+fixed_tags = [
+    "venasbet prediction",
+    "venasbet prediction for today and tomorrow"
+]
+
 tags_to_add.extend(fixed_tags)
 
 if table:
@@ -68,14 +75,17 @@ if table:
     rows = tbody.find_all("tr") if tbody else []
 
     random.shuffle(rows)
-    rows = rows[:4]
+    rows = rows[:4]  # Limit to 4 matches
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
+
         if len(cols) == 4:
             team_text = cols[2]
+
             search_query = quote_plus(team_text + " result")
             result_link = f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>'
+
             matches.append({
                 "time": cols[0],
                 "league": cols[1],
@@ -90,11 +100,13 @@ if table:
 
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
+
     for team in teams:
         team = team.strip()
         if team:
             if team not in tags_to_add:
                 tags_to_add.append(team)
+
             fixed_tag = f"{team} Fixed Matches"
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
@@ -104,51 +116,17 @@ for match in matches:
 # ==============================
 
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
+
 response = session.get(GITHUB_LINKS_URL)
 response.raise_for_status()
+
 all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
 selected_links = random.sample(all_links, min(3, len(all_links)))
-links_html = "<br>".join(f'<a href="{link}" target="_blank">{link}</a>' for link in selected_links)
 
-# ==============================
-# AI CONTENT GENERATION (You.com)
-# ==============================
-
-def generate_ai_post_youcom(matches, date_str):
-    match_text = ""
-    for m in matches:
-        match_text += f"{m['teams']} ({m['league']}), tip: {m['prediction']}\n"
-
-    prompt = f"""
-Write a detailed football blog post for {date_str}.
-Include:
-- Intro paragraph
-- Analysis per match (form, news, head-to-head, betting insight)
-- Conclusion
-Format output in HTML paragraphs.
-Matches:
-{match_text}
-"""
-
-    url = "https://api.you.com/you/v1/answer"
-    headers = {
-        "Authorization": f"Bearer {YOUCOM_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "question": prompt,
-        "source": "research",
-        "search": True
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("answer", "<p>AI content generation failed.</p>")
-    except Exception as e:
-        print("You.com API exception:", e)
-        return "<p>AI content generation failed.</p>"
+links_html = "<br>".join(
+    f'<a href="{link}" target="_blank">{link}</a>' 
+    for link in selected_links
+)
 
 # ==============================
 # BUILD POST HTML
@@ -179,14 +157,14 @@ for m in matches:
         </tr>
     """
 
-html += "</tbody></table><br>"
+html += f"""
+    </tbody>
+</table>
 
-# Add AI analysis section
-ai_content = generate_ai_post_youcom(matches, formatted_date)
-html += f"<h3>Match Analysis</h3>{ai_content}<br>"
-
-# Add useful links
-html += f"<h3 class='links-per-post'>Useful Links:</h3>{links_html}"
+<br>
+<h3 class="links-per-post">Useful Links:</h3>
+{links_html}
+"""
 
 # ==============================
 # ENSURE TAGS EXIST IN WP
@@ -203,9 +181,11 @@ for tag_name in tags_to_add:
         )
         resp.raise_for_status()
         data = resp.json()
+
         if data:
             tag_ids.append(data[0]["id"])
         else:
+            # Create new tag
             resp = session.post(
                 WP_TAGS_URL,
                 auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
@@ -213,7 +193,9 @@ for tag_name in tags_to_add:
             )
             resp.raise_for_status()
             tag_ids.append(resp.json()["id"])
+
         time.sleep(random.uniform(1.2, 2.5))
+
     except requests.exceptions.RequestException as e:
         print(f"⚠️ Error processing tag '{tag_name}': {e}")
         continue
@@ -227,7 +209,7 @@ post_data = {
     "content": html,
     "status": "publish",
     "tags": tag_ids,
-    "categories": CATEGORY_IDS
+    "categories": CATEGORY_IDS  # ✅ MULTIPLE CATEGORY SUPPORT
 }
 
 response = session.post(
