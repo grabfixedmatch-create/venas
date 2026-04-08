@@ -8,24 +8,24 @@ from requests.auth import HTTPBasicAuth
 from urllib.parse import quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import openai
 
 # ==============================
-# CONFIG
+# WORDPRESS CONFIG
 # ==============================
+
 WP_POST_URL = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
-OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+YOUCOM_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-CATEGORY_IDS = [3764, 3886]  # Your categories
-openai.api_key = OPENAI_KEY
+CATEGORY_IDS = [3764, 3886]
 
 # ==============================
 # CREATE SESSION WITH RETRIES
 # ==============================
+
 def create_session():
     session = requests.Session()
     retries = Retry(
@@ -43,25 +43,24 @@ session = create_session()
 # ==============================
 # FORMAT TODAY'S DATE
 # ==============================
+
 today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
 # SCRAPE VENASBET
 # ==============================
+
 VENASBET_URL = "https://www.venasbet.com/"
 response = session.get(VENASBET_URL)
 response.raise_for_status()
+
 soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
 tags_to_add = []
-
-fixed_tags = [
-    "venasbet prediction",
-    "venasbet prediction for today and tomorrow"
-]
+fixed_tags = ["venasbet prediction", "venasbet prediction for today and tomorrow"]
 tags_to_add.extend(fixed_tags)
 
 if table:
@@ -69,7 +68,7 @@ if table:
     rows = tbody.find_all("tr") if tbody else []
 
     random.shuffle(rows)
-    rows = rows[:4]  # Limit to 4 matches
+    rows = rows[:4]
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
@@ -88,12 +87,14 @@ if table:
 # ==============================
 # GENERATE TAGS FROM TEAMS
 # ==============================
+
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
     for team in teams:
         team = team.strip()
-        if team and team not in tags_to_add:
-            tags_to_add.append(team)
+        if team:
+            if team not in tags_to_add:
+                tags_to_add.append(team)
             fixed_tag = f"{team} Fixed Matches"
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
@@ -101,6 +102,7 @@ for match in matches:
 # ==============================
 # LOAD RANDOM USEFUL LINKS
 # ==============================
+
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 response = session.get(GITHUB_LINKS_URL)
 response.raise_for_status()
@@ -109,95 +111,106 @@ selected_links = random.sample(all_links, min(3, len(all_links)))
 links_html = "<br>".join(f'<a href="{link}" target="_blank">{link}</a>' for link in selected_links)
 
 # ==============================
-# AI CONTENT GENERATION
+# AI CONTENT GENERATION (You.com)
 # ==============================
-def generate_ai_post(matches, date_str):
-    """
-    Generate intro, per-match analysis, and conclusion using OpenAI.
-    """
-    match_details = ""
+
+def generate_ai_post_youcom(matches, date_str):
+    match_text = ""
     for m in matches:
-        match_details += f"{m['teams']} in {m['league']} league with predicted tip {m['prediction']}.\n"
+        match_text += f"{m['teams']} ({m['league']}), tip: {m['prediction']}\n"
 
     prompt = f"""
-You are a football analyst. Today is {date_str}.
-Write a detailed WordPress post including:
-
-1. Introduction (~100 words) about today's football matches.
-2. For each match below, write a short analysis (120-150 words) including team form, recent news, head-to-head, and betting insight.
-3. Conclude with ~60 words summary and advice for bettors.
-4. Include natural SEO-friendly keywords: football predictions, betting tips, match analysis.
-
+Write a detailed football blog post for {date_str}.
+Include:
+- Intro paragraph
+- Analysis per match (form, news, head-to-head, betting insight)
+- Conclusion
+Format output in HTML paragraphs.
 Matches:
-{match_details}
+{match_text}
+"""
 
-Format the output as clean HTML paragraphs.
-    """
+    url = "https://api.you.com/you/v1/answer"
+    headers = {
+        "Authorization": f"Bearer {YOUCOM_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "question": prompt,
+        "source": "research",
+        "search": True
+    }
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=1000
-        )
-        return response.choices[0].message.content.strip()
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("answer", "<p>AI content generation failed.</p>")
     except Exception as e:
-        print(f"⚠️ AI generation error: {e}")
-        return "<p>AI content generation failed. Please try again.</p>"
-
-ai_content = generate_ai_post(matches, formatted_date)
+        print("You.com API exception:", e)
+        return "<p>AI content generation failed.</p>"
 
 # ==============================
 # BUILD POST HTML
 # ==============================
-table_html = """
-<table id="free-tip">
-<thead>
-<tr>
-<th>Time</th>
-<th>League</th>
-<th>Teams</th>
-<th>Tip</th>
-<th style="width: 10%;">Result</th>
-</tr>
-</thead>
-<tbody>
-"""
-for m in matches:
-    table_html += f"""
-<tr>
-<td>{m['time']}</td>
-<td>{m['league']}</td>
-<td>{m['teams']}</td>
-<td>{m['prediction']}</td>
-<td>{m['result']}</td>
-</tr>
-"""
-table_html += "</tbody></table>"
 
-html = f"""
-{ai_content}
-<br>
-{table_html}
-<br>
-<h3 class="links-per-post">Useful Links:</h3>
-{links_html}
+html = """
+<table id="free-tip">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>League</th>
+            <th>Teams</th>
+            <th>Tip</th>
+            <th style="width: 10%;">Result</th>
+        </tr>
+    </thead>
+    <tbody>
 """
+
+for m in matches:
+    html += f"""
+        <tr>
+            <td>{m['time']}</td>
+            <td>{m['league']}</td>
+            <td>{m['teams']}</td>
+            <td>{m['prediction']}</td>
+            <td class="">{m['result']}</td>
+        </tr>
+    """
+
+html += "</tbody></table><br>"
+
+# Add AI analysis section
+ai_content = generate_ai_post_youcom(matches, formatted_date)
+html += f"<h3>Match Analysis</h3>{ai_content}<br>"
+
+# Add useful links
+html += f"<h3 class='links-per-post'>Useful Links:</h3>{links_html}"
 
 # ==============================
 # ENSURE TAGS EXIST IN WP
 # ==============================
+
 tag_ids = []
+
 for tag_name in tags_to_add:
     try:
-        resp = session.get(WP_TAGS_URL, params={"search": tag_name}, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD))
+        resp = session.get(
+            WP_TAGS_URL,
+            params={"search": tag_name},
+            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
+        )
         resp.raise_for_status()
         data = resp.json()
         if data:
             tag_ids.append(data[0]["id"])
         else:
-            resp = session.post(WP_TAGS_URL, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD), json={"name": tag_name})
+            resp = session.post(
+                WP_TAGS_URL,
+                auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
+                json={"name": tag_name}
+            )
             resp.raise_for_status()
             tag_ids.append(resp.json()["id"])
         time.sleep(random.uniform(1.2, 2.5))
@@ -208,6 +221,7 @@ for tag_name in tags_to_add:
 # ==============================
 # CREATE WORDPRESS POST
 # ==============================
+
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
@@ -216,9 +230,13 @@ post_data = {
     "categories": CATEGORY_IDS
 }
 
-response = session.post(WP_POST_URL, json=post_data, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD))
+response = session.post(
+    WP_POST_URL,
+    json=post_data,
+    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
+)
 
 if response.status_code == 201:
-    print("✅ AI-powered post created successfully!")
+    print("✅ Post created successfully in multiple categories!")
 else:
     print("❌ Failed to create post:", response.text)
