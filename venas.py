@@ -8,30 +8,24 @@ from requests.auth import HTTPBasicAuth
 from urllib.parse import quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from openai import OpenAI
+import openai
 
 # ==============================
-# OPENAI CONFIG
+# CONFIG
 # ==============================
-
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# ==============================
-# WORDPRESS CONFIG
-# ==============================
-
 WP_POST_URL = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
 
-CATEGORY_IDS = [3764, 3886]
+CATEGORY_IDS = [3764, 3886]  # Your categories
+openai.api_key = OPENAI_KEY
 
 # ==============================
-# SESSION WITH RETRIES
+# CREATE SESSION WITH RETRIES
 # ==============================
-
 def create_session():
     session = requests.Session()
     retries = Retry(
@@ -47,92 +41,17 @@ def create_session():
 session = create_session()
 
 # ==============================
-# DATE
+# FORMAT TODAY'S DATE
 # ==============================
-
 today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
-# AI FUNCTIONS
-# ==============================
-
-def generate_intro():
-    prompt = f"""
-Write a 80-100 word introduction for a football predictions post.
-
-Include:
-- Mention today's date: {formatted_date}
-- Mention football predictions, betting tips, today's matches
-- Make it natural and engaging
-"""
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        print("Intro AI error:", e)
-        return ""
-
-def generate_match_preview(match):
-    prompt = f"""
-Write a 120-150 word football match preview.
-
-Match: {match['teams']}
-League: {match['league']}
-Time: {match['time']}
-Prediction: {match['prediction']}
-
-Include:
-- Short intro
-- Team performance assumptions
-- Betting insight
-- Natural conclusion
-
-Make it unique and human-like.
-"""
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.8
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        print("Preview AI error:", e)
-        return ""
-
-def generate_conclusion():
-    prompt = """
-Write a 60-80 word conclusion for a football prediction article.
-
-Include:
-- General betting advice
-- Mention today's matches
-- Keep it natural and concise
-"""
-    try:
-        res = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return res.choices[0].message.content.strip()
-    except Exception as e:
-        print("Conclusion AI error:", e)
-        return ""
-
-# ==============================
 # SCRAPE VENASBET
 # ==============================
-
 VENASBET_URL = "https://www.venasbet.com/"
 response = session.get(VENASBET_URL)
 response.raise_for_status()
-
 soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
@@ -143,7 +62,6 @@ fixed_tags = [
     "venasbet prediction",
     "venasbet prediction for today and tomorrow"
 ]
-
 tags_to_add.extend(fixed_tags)
 
 if table:
@@ -151,17 +69,14 @@ if table:
     rows = tbody.find_all("tr") if tbody else []
 
     random.shuffle(rows)
-    rows = rows[:4]
+    rows = rows[:4]  # Limit to 4 matches
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
-
         if len(cols) == 4:
             team_text = cols[2]
-
             search_query = quote_plus(team_text + " result")
             result_link = f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>'
-
             matches.append({
                 "time": cols[0],
                 "league": cols[1],
@@ -171,59 +86,72 @@ if table:
             })
 
 # ==============================
-# GENERATE AI CONTENT
+# GENERATE TAGS FROM TEAMS
 # ==============================
-
-intro_text = generate_intro()
-
-for match in matches:
-    match["preview"] = generate_match_preview(match)
-    time.sleep(random.uniform(1, 2))
-
-conclusion_text = generate_conclusion()
-
-# ==============================
-# TAGS FROM TEAMS
-# ==============================
-
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
-
     for team in teams:
         team = team.strip()
-        if team:
-            if team not in tags_to_add:
-                tags_to_add.append(team)
-
+        if team and team not in tags_to_add:
+            tags_to_add.append(team)
             fixed_tag = f"{team} Fixed Matches"
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
 
 # ==============================
-# RANDOM LINKS
+# LOAD RANDOM USEFUL LINKS
 # ==============================
-
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 response = session.get(GITHUB_LINKS_URL)
 response.raise_for_status()
-
 all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
 selected_links = random.sample(all_links, min(3, len(all_links)))
-
-links_html = "<br>".join(
-    f'<a href="{link}" target="_blank">{link}</a>'
-    for link in selected_links
-)
+links_html = "<br>".join(f'<a href="{link}" target="_blank">{link}</a>' for link in selected_links)
 
 # ==============================
-# BUILD HTML
+# AI CONTENT GENERATION
 # ==============================
+def generate_ai_post(matches, date_str):
+    """
+    Generate intro, per-match analysis, and conclusion using OpenAI.
+    """
+    match_details = ""
+    for m in matches:
+        match_details += f"{m['teams']} in {m['league']} league with predicted tip {m['prediction']}.\n"
 
-html = f"""
-<p>{intro_text}</p>
+    prompt = f"""
+You are a football analyst. Today is {date_str}.
+Write a detailed WordPress post including:
 
-<h2>Today's Football Predictions</h2>
+1. Introduction (~100 words) about today's football matches.
+2. For each match below, write a short analysis (120-150 words) including team form, recent news, head-to-head, and betting insight.
+3. Conclude with ~60 words summary and advice for bettors.
+4. Include natural SEO-friendly keywords: football predictions, betting tips, match analysis.
 
+Matches:
+{match_details}
+
+Format the output as clean HTML paragraphs.
+    """
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ AI generation error: {e}")
+        return "<p>AI content generation failed. Please try again.</p>"
+
+ai_content = generate_ai_post(matches, formatted_date)
+
+# ==============================
+# BUILD POST HTML
+# ==============================
+table_html = """
 <table id="free-tip">
 <thead>
 <tr>
@@ -236,9 +164,8 @@ html = f"""
 </thead>
 <tbody>
 """
-
 for m in matches:
-    html += f"""
+    table_html += f"""
 <tr>
 <td>{m['time']}</td>
 <td>{m['league']}</td>
@@ -247,82 +174,51 @@ for m in matches:
 <td>{m['result']}</td>
 </tr>
 """
+table_html += "</tbody></table>"
 
-html += "</tbody></table>"
-
-# MATCH PREVIEWS
-html += "<h2>Match Previews & Analysis</h2>"
-
-for m in matches:
-    html += f"""
-<h3>{m['teams']} Prediction</h3>
-<p>{m.get('preview', '')}</p>
-"""
-
-# CONCLUSION
-html += f"""
-<h3>Final Thoughts</h3>
-<p>{conclusion_text}</p>
-"""
-
-# LINKS
-html += f"""
+html = f"""
+{ai_content}
+<br>
+{table_html}
 <br>
 <h3 class="links-per-post">Useful Links:</h3>
 {links_html}
 """
 
 # ==============================
-# WORDPRESS TAG HANDLING
+# ENSURE TAGS EXIST IN WP
 # ==============================
-
 tag_ids = []
-
 for tag_name in tags_to_add:
     try:
-        resp = session.get(
-            WP_TAGS_URL,
-            params={"search": tag_name},
-            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
-        )
+        resp = session.get(WP_TAGS_URL, params={"search": tag_name}, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD))
         resp.raise_for_status()
         data = resp.json()
-
         if data:
             tag_ids.append(data[0]["id"])
         else:
-            resp = session.post(
-                WP_TAGS_URL,
-                auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
-                json={"name": tag_name}
-            )
+            resp = session.post(WP_TAGS_URL, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD), json={"name": tag_name})
             resp.raise_for_status()
             tag_ids.append(resp.json()["id"])
-
         time.sleep(random.uniform(1.2, 2.5))
-
-    except Exception as e:
-        print(f"Tag error: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error processing tag '{tag_name}': {e}")
+        continue
 
 # ==============================
-# CREATE POST
+# CREATE WORDPRESS POST
 # ==============================
-
 post_data = {
-    "title": f"Football Predictions Today ({formatted_date}) – Betting Tips & Match Analysis",
+    "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
     "status": "publish",
     "tags": tag_ids,
     "categories": CATEGORY_IDS
 }
 
-response = session.post(
-    WP_POST_URL,
-    json=post_data,
-    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
-)
+response = session.post(WP_POST_URL, json=post_data, auth=HTTPBasicAuth(USERNAME, APP_PASSWORD))
 
 if response.status_code == 201:
-    print("✅ Post created successfully!")
+    print("✅ AI-powered post created successfully!")
 else:
-    print("❌ Failed:", response.text)
+    print("❌ Failed to create post:", response.text)
