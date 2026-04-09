@@ -59,7 +59,7 @@ try:
     # Wait up to 3 minutes (180 seconds)
     start_time = time.time()
     response = client.models.generate_content(
-        model="text-bison-001",
+        model="gemini-3-flash-preview",
         contents=f"Write a short introduction (150-200 chars) for today's football tips, date {formatted_date}"
     )
     elapsed = time.time() - start_time
