@@ -10,42 +10,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ==============================
-# AI CONFIG
-# ==============================
-
-AI_API_KEY = "apf_bin5bqsgsxxxbeo0fsnw9b72"
-AI_URL = "https://apifreellm.com/api/v1/chat"
-
-def call_ai(prompt, retries=3):
-    for attempt in range(retries):
-        try:
-            response = requests.post(
-                AI_URL,
-                headers={
-                    "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={"message": prompt},
-                timeout=60
-            )
-
-            data = response.json()
-            print("AI RAW:", data)
-
-            if data.get("success") and data.get("response"):
-                text = data["response"].strip()
-                if len(text) > 50:
-                    return text
-
-        except Exception as e:
-            print("AI Error:", e)
-
-        print(f"⚠️ Retry {attempt+1}")
-        time.sleep(10)
-
-    return ""
-
-# ==============================
 # WORDPRESS CONFIG
 # ==============================
 
@@ -83,7 +47,7 @@ today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
-# SCRAPE
+# SCRAPE VENASBET
 # ==============================
 
 VENASBET_URL = "https://www.venasbet.com/"
@@ -120,47 +84,82 @@ if table:
             })
 
 # ==============================
-# AI: SINGLE CALL (INTRO + PREVIEWS)
+# AI CONFIG
 # ==============================
 
-match_list_text = "\n".join([f"- {m['teams']}" for m in matches])
+AI_API_KEY = "apf_bin5bqsgsxxxbeo0fsnw9b72"
+AI_URL = "https://apifreellm.com/api/v1/chat"
+
+def call_ai(prompt):
+    try:
+        response = requests.post(
+            AI_URL,
+            headers={
+                "Authorization": f"Bearer {AI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={"message": prompt},
+            timeout=120
+        )
+
+        data = response.json()
+        print("AI RAW:", data)
+
+        if data.get("success") and data.get("response"):
+            return data["response"].strip()
+
+    except Exception as e:
+        print("AI Error:", e)
+
+    return ""
+
+# ==============================
+# AI PROMPT
+# ==============================
+
+match_list_text = "\n".join([m['teams'] for m in matches])
 
 ai_prompt = f"""
-Write a football predictions article.
+Write a football predictions article for today ({formatted_date}).
 
 Matches:
 {match_list_text}
 
-Requirements:
-- Start with a short introduction (100-150 words)
-- Then write each match with:
-  <h2>Team vs Team Prediction & Preview</h2>
-  <p>Short analysis (form + prediction)</p>
-
-Return ONLY HTML.
-Use simple <p> and <h2>.
+Include:
+- short introduction (100-150 words)
+- for each match write a detailed preview (form, H2H, prediction)
+- return in HTML or markdown
 """
 
-ai_content = call_ai(ai_prompt)
+# Wait before calling to avoid empty response
+print("⏳ Waiting 45 seconds before calling AI...")
+time.sleep(45)
+
+ai_content_raw = call_ai(ai_prompt)
 
 # ==============================
-# FALLBACK IF AI FAILS
+# MARKDOWN TO HTML
 # ==============================
 
-if not ai_content:
+def markdown_to_html(text):
+    text = text.replace("**", "")  # remove bold
+    text = text.replace("\n\n", "</p><p>")
+    text = text.replace("\n", "<br>")
+    return f"<p>{text}</p>"
+
+if ai_content_raw:
+    ai_content = markdown_to_html(ai_content_raw)
+else:
+    # fallback if AI fails
     intro_fallback = f"""
-    <p>Today's football predictions for {formatted_date} include exciting matches across multiple competitions.
-    Below you can find selected tips along with short match analysis.</p>
+    <p>Today's football predictions for {formatted_date} include exciting matches across multiple competitions.</p>
     """
-
     previews_fallback = ""
-
     for m in matches:
         previews_fallback += f"""
         <h2>{m['teams']} Prediction & Preview</h2>
         <p>{m['teams']} is expected to be a competitive match. Based on recent form and squad quality, this game could offer good scoring chances.</p>
         """
-
     ai_content = intro_fallback + previews_fallback
 
 # ==============================
@@ -180,7 +179,6 @@ for match in matches:
 # ==============================
 
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
-
 response = session.get(GITHUB_LINKS_URL)
 response.raise_for_status()
 
@@ -193,7 +191,7 @@ links_html = "<br>".join(
 )
 
 # ==============================
-# BUILD TABLE HTML
+# TABLE HTML
 # ==============================
 
 table_html = """
@@ -243,7 +241,7 @@ html = f"""
 """
 
 # ==============================
-# TAG CREATION
+# CREATE/GET TAGS IN WP
 # ==============================
 
 tag_ids = []
@@ -275,7 +273,7 @@ for tag_name in tags_to_add:
         print(f"Tag error: {e}")
 
 # ==============================
-# POST
+# POST TO WORDPRESS
 # ==============================
 
 post_data = {
