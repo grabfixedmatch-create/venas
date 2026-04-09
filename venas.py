@@ -54,7 +54,7 @@ intro_text = f"<p>Today's football predictions for {formatted_date} include care
 
 try:
     import google.genai as genai
-    client = genai.Client(api_key="AIzaSyAX9_hl_0yVTv4TcxytCuDzVGEMORfS3lM")
+    client = genai.Client(api_key="AIzaSyB98tmGTMYfdSGjsnbAbaCpVDv8518J1Gg")
 
     # Wait up to 3 minutes (180 seconds)
     start_time = time.time()
