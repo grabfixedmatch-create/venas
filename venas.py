@@ -19,7 +19,6 @@ WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
 
-# ✅ MULTIPLE CATEGORY IDS
 CATEGORY_IDS = [3764, 3886]
 
 # ==============================
@@ -129,10 +128,41 @@ links_html = "<br>".join(
 )
 
 # ==============================
-# BUILD POST HTML
+# GENERATE INTRODUCTION VIA GOOGLE GENAI
 # ==============================
 
-html = """
+DEFAULT_INTRO = f"<p>Today's football predictions for {formatted_date} include carefully selected matches based on team form and recent performances.</p>"
+
+intro_html = DEFAULT_INTRO
+
+try:
+    GENAI_API_KEY = "AIzaSyAX9_hl_0yVTv4TcxytCuDzVGEMORfS3lM"
+    response = requests.post(
+        "https://genai.google/api/v1beta2/models/text-bison-001:generateText",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {GENAI_API_KEY}"
+        },
+        json={
+            "prompt": f"Write a 150-200 character introduction for a daily football tips post for {formatted_date}.",
+            "temperature": 0.7,
+            "maxOutputTokens": 120
+        }
+    )
+
+    data = response.json()
+    if "candidates" in data and len(data["candidates"]) > 0:
+        intro_text = data["candidates"][0]["content"]
+        intro_html = f"<p>{intro_text}</p>"
+
+except Exception as e:
+    print(f"⚠️ AI intro generation failed, using default: {e}")
+
+# ==============================
+# BUILD POST HTML (ONLY INTRO + TABLE)
+# ==============================
+
+html = intro_html + """
 <table id="free-tip">
     <thead>
         <tr>
@@ -209,7 +239,7 @@ post_data = {
     "content": html,
     "status": "publish",
     "tags": tag_ids,
-    "categories": CATEGORY_IDS  # ✅ MULTIPLE CATEGORY SUPPORT
+    "categories": CATEGORY_IDS
 }
 
 response = session.post(
@@ -219,6 +249,6 @@ response = session.post(
 )
 
 if response.status_code == 201:
-    print("✅ Post created successfully in multiple categories!")
+    print("✅ Post created successfully!")
 else:
     print("❌ Failed to create post:", response.text)
