@@ -19,10 +19,11 @@ WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
 
+# ✅ MULTIPLE CATEGORY IDS
 CATEGORY_IDS = [3764, 3886]
 
 # ==============================
-# SESSION
+# CREATE SESSION WITH RETRIES
 # ==============================
 
 def create_session():
@@ -40,17 +41,18 @@ def create_session():
 session = create_session()
 
 # ==============================
-# DATE
+# FORMAT TODAY'S DATE
 # ==============================
 
 today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
-# SCRAPE
+# SCRAPE VENASBET
 # ==============================
 
 VENASBET_URL = "https://www.venasbet.com/"
+
 response = session.get(VENASBET_URL)
 response.raise_for_status()
 
@@ -58,166 +60,156 @@ soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
+tags_to_add = []
+
+# Fixed SEO Tags
+fixed_tags = [
+    "venasbet prediction",
+    "venasbet prediction for today and tomorrow"
+]
+
+tags_to_add.extend(fixed_tags)
 
 if table:
-    rows = table.find("tbody").find_all("tr")
+    tbody = table.find("tbody")
+    rows = tbody.find_all("tr") if tbody else []
+
     random.shuffle(rows)
-    rows = rows[:4]
+    rows = rows[:4]  # Limit to 4 matches
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
 
         if len(cols) == 4:
             team_text = cols[2]
+
             search_query = quote_plus(team_text + " result")
+            result_link = f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>'
 
             matches.append({
                 "time": cols[0],
                 "league": cols[1],
                 "teams": team_text,
                 "prediction": cols[3],
-                "result": f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>',
+                "result": result_link,
             })
 
 # ==============================
-# AI CONFIG
+# GENERATE TAGS FROM TEAMS
 # ==============================
 
-AI_API_KEY = "apf_bin5bqsgsxxxbeo0fsnw9b72"
-AI_URL = "https://apifreellm.com/api/v1/chat"
+for match in matches:
+    teams = match["teams"].replace("VS", "|").split("|")
 
-def call_ai_with_long_wait(prompt):
-    MAX_TOTAL_WAIT = 900  # 15 minutes
-    WAIT_BETWEEN = 60     # retry every 60s
-    elapsed = 0
+    for team in teams:
+        team = team.strip()
+        if team:
+            if team not in tags_to_add:
+                tags_to_add.append(team)
 
-    while elapsed < MAX_TOTAL_WAIT:
-        try:
-            print(f"➡️ Calling AI... (elapsed {elapsed}s)")
-
-            response = requests.post(
-                AI_URL,
-                headers={
-                    "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0"
-                },
-                json={"message": prompt},
-                timeout=180
-            )
-
-            print("➡️ STATUS:", response.status_code)
-            print("➡️ RAW TEXT:", response.text[:300])
-
-            # SAFE JSON PARSE
-            try:
-                data = response.json()
-            except Exception:
-                print("❌ Not JSON response")
-                data = None
-
-            if data and data.get("success") and data.get("response"):
-                text = data["response"].strip()
-
-                if len(text) > 50:
-                    print("✅ AI SUCCESS")
-                    return text
-
-        except Exception as e:
-            print("❌ AI Error:", e)
-
-        print("⏳ Waiting before retry...")
-        time.sleep(WAIT_BETWEEN)
-        elapsed += WAIT_BETWEEN
-
-    print("⚠️ AI FAILED AFTER 15 MINUTES")
-    return None
+            fixed_tag = f"{team} Fixed Matches"
+            if fixed_tag not in tags_to_add:
+                tags_to_add.append(fixed_tag)
 
 # ==============================
-# AI INTRO ONLY
+# LOAD RANDOM USEFUL LINKS
 # ==============================
 
-intro_prompt = f"""
-Write a 150-200 word introduction for today's football predictions ({formatted_date}).
+GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 
-Explain:
-- why these matches are selected
-- that analysis is based on form and stats
-- encourage users to check predictions below
+response = session.get(GITHUB_LINKS_URL)
+response.raise_for_status()
 
-Write like a sports betting article.
-"""
+all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
+selected_links = random.sample(all_links, min(3, len(all_links)))
 
-intro_text = call_ai_with_long_wait(intro_prompt)
-
-# ==============================
-# FALLBACK
-# ==============================
-
-if not intro_text:
-    intro_text = f"""
-Today's football predictions for {formatted_date} include carefully selected matches based on team form, recent performances, and statistical analysis.
-These tips aim to highlight valuable opportunities across different competitions, helping users make more informed betting decisions.
-Check the table below for today's top picks and insights.
-"""
-
-# CLEAN TEXT
-intro_text = intro_text.replace("\n", " ").replace("**", "")
-
-intro_html = f"<p>{intro_text}</p>"
+links_html = "<br>".join(
+    f'<a href="{link}" target="_blank">{link}</a>' 
+    for link in selected_links
+)
 
 # ==============================
-# BUILD TABLE
+# BUILD POST HTML
 # ==============================
 
-table_html = """
+html = """
 <table id="free-tip">
-<thead>
-<tr>
-<th>Time</th>
-<th>League</th>
-<th>Teams</th>
-<th>Tip</th>
-<th style="width: 10%;">Result</th>
-</tr>
-</thead>
-<tbody>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>League</th>
+            <th>Teams</th>
+            <th>Tip</th>
+            <th style="width: 10%;">Result</th>
+        </tr>
+    </thead>
+    <tbody>
 """
 
 for m in matches:
-    table_html += f"""
-    <tr>
-    <td>{m['time']}</td>
-    <td>{m['league']}</td>
-    <td>{m['teams']}</td>
-    <td>{m['prediction']}</td>
-    <td class="">{m['result']}</td>
-    </tr>
+    html += f"""
+        <tr>
+            <td>{m['time']}</td>
+            <td>{m['league']}</td>
+            <td>{m['teams']}</td>
+            <td>{m['prediction']}</td>
+            <td class="">{m['result']}</td>
+        </tr>
     """
 
-table_html += "</tbody></table>"
-
-# ==============================
-# FINAL HTML
-# ==============================
-
-html = f"""
-{intro_html}
+html += f"""
+    </tbody>
+</table>
 
 <br>
-
-{table_html}
+<h3 class="links-per-post">Useful Links:</h3>
+{links_html}
 """
 
 # ==============================
-# POST TO WORDPRESS
+# ENSURE TAGS EXIST IN WP
+# ==============================
+
+tag_ids = []
+
+for tag_name in tags_to_add:
+    try:
+        resp = session.get(
+            WP_TAGS_URL,
+            params={"search": tag_name},
+            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data:
+            tag_ids.append(data[0]["id"])
+        else:
+            # Create new tag
+            resp = session.post(
+                WP_TAGS_URL,
+                auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
+                json={"name": tag_name}
+            )
+            resp.raise_for_status()
+            tag_ids.append(resp.json()["id"])
+
+        time.sleep(random.uniform(1.2, 2.5))
+
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Error processing tag '{tag_name}': {e}")
+        continue
+
+# ==============================
+# CREATE WORDPRESS POST
 # ==============================
 
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
     "status": "publish",
-    "categories": CATEGORY_IDS
+    "tags": tag_ids,
+    "categories": CATEGORY_IDS  # ✅ MULTIPLE CATEGORY SUPPORT
 }
 
 response = session.post(
@@ -226,5 +218,7 @@ response = session.post(
     auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
 )
 
-print("➡️ WP STATUS:", response.status_code)
-print("➡️ WP RESPONSE:", response.text)
+if response.status_code == 201:
+    print("✅ Post created successfully in multiple categories!")
+else:
+    print("❌ Failed to create post:", response.text)
