@@ -58,10 +58,6 @@ soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
-tags_to_add = [
-    "venasbet prediction",
-    "venasbet prediction for today and tomorrow"
-]
 
 if table:
     rows = table.find("tbody").find_all("tr")
@@ -91,9 +87,8 @@ AI_API_KEY = "apf_bin5bqsgsxxxbeo0fsnw9b72"
 AI_URL = "https://apifreellm.com/api/v1/chat"
 
 def call_ai_with_long_wait(prompt):
-    MAX_TOTAL_WAIT = 600  # 10 minutes
-    WAIT_BETWEEN = 60     # 1 minute per try
-
+    MAX_TOTAL_WAIT = 900  # 15 minutes
+    WAIT_BETWEEN = 60     # retry every 60s
     elapsed = 0
 
     while elapsed < MAX_TOTAL_WAIT:
@@ -104,19 +99,27 @@ def call_ai_with_long_wait(prompt):
                 AI_URL,
                 headers={
                     "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0"
                 },
                 json={"message": prompt},
-                timeout=180  # 3 minutes timeout per request
+                timeout=180
             )
 
-            data = response.json()
-            print("➡️ AI RAW:", data)
+            print("➡️ STATUS:", response.status_code)
+            print("➡️ RAW TEXT:", response.text[:300])
 
-            if data.get("success") and data.get("response"):
+            # SAFE JSON PARSE
+            try:
+                data = response.json()
+            except Exception:
+                print("❌ Not JSON response")
+                data = None
+
+            if data and data.get("success") and data.get("response"):
                 text = data["response"].strip()
 
-                if len(text) > 100:
+                if len(text) > 50:
                     print("✅ AI SUCCESS")
                     return text
 
@@ -127,7 +130,7 @@ def call_ai_with_long_wait(prompt):
         time.sleep(WAIT_BETWEEN)
         elapsed += WAIT_BETWEEN
 
-    print("⚠️ AI FAILED AFTER 10 MINUTES")
+    print("⚠️ AI FAILED AFTER 15 MINUTES")
     return None
 
 # ==============================
@@ -147,11 +150,14 @@ Write like a sports betting article.
 
 intro_text = call_ai_with_long_wait(intro_prompt)
 
-# ✅ FALLBACK (ALWAYS SAFE)
+# ==============================
+# FALLBACK
+# ==============================
+
 if not intro_text:
     intro_text = f"""
-Today's football predictions for {formatted_date} include carefully selected matches based on team form, recent performances, and statistical analysis. 
-These tips aim to highlight valuable opportunities across different competitions, helping users make more informed betting decisions. 
+Today's football predictions for {formatted_date} include carefully selected matches based on team form, recent performances, and statistical analysis.
+These tips aim to highlight valuable opportunities across different competitions, helping users make more informed betting decisions.
 Check the table below for today's top picks and insights.
 """
 
@@ -204,7 +210,7 @@ html = f"""
 """
 
 # ==============================
-# POST
+# POST TO WORDPRESS
 # ==============================
 
 post_data = {
