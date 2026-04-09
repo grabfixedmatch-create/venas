@@ -25,7 +25,11 @@ def call_ai(prompt):
             timeout=60
         )
         response.raise_for_status()
-        return response.json().get("response", "")
+        data = response.json()
+
+        # ✅ FIXED parsing
+        return data.get("message") or data.get("response") or ""
+
     except Exception as e:
         print("AI Error:", e)
         return ""
@@ -109,14 +113,13 @@ if table:
 # ==============================
 
 intro_prompt = f"""
-Write a 150-word SEO-friendly introduction for a football predictions article.
+Write a 150-word introduction for a football predictions article.
+
+Return HTML only using <p> tags.
+No markdown, no backticks.
 
 Date: {formatted_date}
-
-Include:
-- Mention today's football predictions
-- Encourage users to check the table
-- Use engaging tone
+Mention today's football predictions and encourage users to check the table.
 """
 
 intro_text = call_ai(intro_prompt)
@@ -134,13 +137,16 @@ Write a detailed football match preview for:
 
 {match['teams']}
 
+Return HTML only:
+- Use <p> tags
+- No markdown
+- No backticks
+
 Include:
 - Recent form
-- Head-to-head (if possible)
+- Head-to-head
 - Tactical analysis
 - Prediction reasoning
-
-Make it SEO-friendly with short paragraphs.
 """
 
     preview = call_ai(prompt)
@@ -148,7 +154,7 @@ Make it SEO-friendly with short paragraphs.
 
     match_previews_html += f"""
     <h2>{match['teams']} Prediction & Preview</h2>
-    <p>{preview}</p>
+    {preview}
     """
 
 # ==============================
@@ -170,6 +176,8 @@ for match in matches:
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 
 response = session.get(GITHUB_LINKS_URL)
+response.raise_for_status()
+
 all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
 selected_links = random.sample(all_links, min(3, len(all_links)))
 
@@ -183,7 +191,7 @@ links_html = "<br>".join(
 # ==============================
 
 html = f"""
-<p>{intro_text}</p>
+{intro_text}
 
 <table id="free-tip">
 <thead>
@@ -192,7 +200,7 @@ html = f"""
 <th>League</th>
 <th>Teams</th>
 <th>Tip</th>
-<th>Result</th>
+<th style="width: 10%;">Result</th>
 </tr>
 </thead>
 <tbody>
@@ -205,7 +213,7 @@ for m in matches:
     <td>{m['league']}</td>
     <td>{m['teams']}</td>
     <td>{m['prediction']}</td>
-    <td>{m['result']}</td>
+    <td class="">{m['result']}</td>
     </tr>
     """
 
@@ -214,6 +222,7 @@ html += f"""
 </table>
 
 <br>
+
 {match_previews_html}
 
 <br>
@@ -234,6 +243,7 @@ for tag_name in tags_to_add:
             params={"search": tag_name},
             auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
         )
+        resp.raise_for_status()
         data = resp.json()
 
         if data:
@@ -244,12 +254,13 @@ for tag_name in tags_to_add:
                 auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
                 json={"name": tag_name}
             )
+            resp.raise_for_status()
             tag_ids.append(resp.json()["id"])
 
-        time.sleep(1.5)
+        time.sleep(random.uniform(1.2, 2.0))
 
     except Exception as e:
-        print("Tag error:", e)
+        print(f"Tag error: {e}")
 
 # ==============================
 # POST
@@ -269,4 +280,7 @@ response = session.post(
     auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
 )
 
-print("✅ DONE" if response.status_code == 201 else response.text)
+if response.status_code == 201:
+    print("✅ Post created successfully!")
+else:
+    print("❌ Failed:", response.text)
