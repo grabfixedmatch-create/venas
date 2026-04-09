@@ -16,23 +16,31 @@ from urllib3.util.retry import Retry
 AI_API_KEY = "apf_bin5bqsgsxxxbeo0fsnw9b72"
 AI_URL = "https://apifreellm.com/api/v1/chat"
 
-def call_ai(prompt):
-    try:
-        response = requests.post(
-            AI_URL,
-            headers={"Authorization": f"Bearer {AI_API_KEY}"},
-            json={"message": prompt},
-            timeout=60
-        )
-        response.raise_for_status()
-        data = response.json()
+def call_ai(prompt, retries=3):
+    for attempt in range(retries):
+        try:
+            response = requests.post(
+                AI_URL,
+                headers={"Authorization": f"Bearer {AI_API_KEY}"},
+                json={"message": prompt},
+                timeout=60
+            )
+            response.raise_for_status()
+            data = response.json()
 
-        # ✅ FIXED parsing
-        return data.get("message") or data.get("response") or ""
+            text = data.get("message") or data.get("response") or ""
 
-    except Exception as e:
-        print("AI Error:", e)
-        return ""
+            if text and len(text.strip()) > 50:
+                return text.strip()
+
+            print(f"⚠️ Empty AI response, retry {attempt+1}/{retries}")
+
+        except Exception as e:
+            print("AI Error:", e)
+
+        time.sleep(5)
+
+    return "<p>Match analysis currently unavailable. Check back later for full insights.</p>"
 
 # ==============================
 # WORDPRESS CONFIG
@@ -109,53 +117,58 @@ if table:
             })
 
 # ==============================
-# AI: INTRO
+# AI INTRO
 # ==============================
 
 intro_prompt = f"""
-Write a 150-word introduction for a football predictions article.
+Write a 150-word football predictions introduction.
 
-Return HTML only using <p> tags.
-No markdown, no backticks.
+Return HTML with <p> tags only.
 
 Date: {formatted_date}
-Mention today's football predictions and encourage users to check the table.
 """
 
 intro_text = call_ai(intro_prompt)
+
+if not intro_text.strip():
+    intro_text = f"""
+    <p>Today's football predictions for {formatted_date} feature exciting matches across major competitions. 
+    Below you can find carefully selected tips along with detailed analysis for each game.</p>
+    """
+
 time.sleep(25)
 
 # ==============================
-# AI: MATCH PREVIEWS
+# AI MATCH PREVIEWS
 # ==============================
 
 match_previews_html = ""
 
 for match in matches:
     prompt = f"""
-Write a detailed football match preview for:
+Write a football match preview for:
 
 {match['teams']}
 
-Return HTML only:
-- Use <p> tags
-- No markdown
-- No backticks
+Return HTML using <p> tags only.
 
 Include:
-- Recent form
+- Team form
 - Head-to-head
-- Tactical analysis
-- Prediction reasoning
+- Short analysis
 """
 
     preview = call_ai(prompt)
-    time.sleep(25)
+
+    if not preview.strip():
+        preview = "<p>This match features two competitive teams. Based on recent form, expect a balanced game.</p>"
 
     match_previews_html += f"""
     <h2>{match['teams']} Prediction & Preview</h2>
     {preview}
     """
+
+    time.sleep(25)
 
 # ==============================
 # TAGS
