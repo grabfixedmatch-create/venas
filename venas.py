@@ -21,26 +21,29 @@ def call_ai(prompt, retries=3):
         try:
             response = requests.post(
                 AI_URL,
-                headers={"Authorization": f"Bearer {AI_API_KEY}"},
+                headers={
+                    "Authorization": f"Bearer {AI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
                 json={"message": prompt},
                 timeout=60
             )
-            response.raise_for_status()
+
             data = response.json()
+            print("AI RAW:", data)
 
-            text = data.get("message") or data.get("response") or ""
-
-            if text and len(text.strip()) > 50:
-                return text.strip()
-
-            print(f"⚠️ Empty AI response, retry {attempt+1}/{retries}")
+            if data.get("success") and data.get("response"):
+                text = data["response"].strip()
+                if len(text) > 50:
+                    return text
 
         except Exception as e:
             print("AI Error:", e)
 
-        time.sleep(5)
+        print(f"⚠️ Retry {attempt+1}")
+        time.sleep(10)
 
-    return "<p>Match analysis currently unavailable. Check back later for full insights.</p>"
+    return ""
 
 # ==============================
 # WORDPRESS CONFIG
@@ -117,58 +120,48 @@ if table:
             })
 
 # ==============================
-# AI INTRO
+# AI: SINGLE CALL (INTRO + PREVIEWS)
 # ==============================
 
-intro_prompt = f"""
-Write a 150-word football predictions introduction.
+match_list_text = "\n".join([f"- {m['teams']}" for m in matches])
 
-Return HTML with <p> tags only.
+ai_prompt = f"""
+Write a football predictions article.
 
-Date: {formatted_date}
+Matches:
+{match_list_text}
+
+Requirements:
+- Start with a short introduction (100-150 words)
+- Then write each match with:
+  <h2>Team vs Team Prediction & Preview</h2>
+  <p>Short analysis (form + prediction)</p>
+
+Return ONLY HTML.
+Use simple <p> and <h2>.
 """
 
-intro_text = call_ai(intro_prompt)
-
-if not intro_text.strip():
-    intro_text = f"""
-    <p>Today's football predictions for {formatted_date} feature exciting matches across major competitions. 
-    Below you can find carefully selected tips along with detailed analysis for each game.</p>
-    """
-
-time.sleep(25)
+ai_content = call_ai(ai_prompt)
 
 # ==============================
-# AI MATCH PREVIEWS
+# FALLBACK IF AI FAILS
 # ==============================
 
-match_previews_html = ""
-
-for match in matches:
-    prompt = f"""
-Write a football match preview for:
-
-{match['teams']}
-
-Return HTML using <p> tags only.
-
-Include:
-- Team form
-- Head-to-head
-- Short analysis
-"""
-
-    preview = call_ai(prompt)
-
-    if not preview.strip():
-        preview = "<p>This match features two competitive teams. Based on recent form, expect a balanced game.</p>"
-
-    match_previews_html += f"""
-    <h2>{match['teams']} Prediction & Preview</h2>
-    {preview}
+if not ai_content:
+    intro_fallback = f"""
+    <p>Today's football predictions for {formatted_date} include exciting matches across multiple competitions.
+    Below you can find selected tips along with short match analysis.</p>
     """
 
-    time.sleep(25)
+    previews_fallback = ""
+
+    for m in matches:
+        previews_fallback += f"""
+        <h2>{m['teams']} Prediction & Preview</h2>
+        <p>{m['teams']} is expected to be a competitive match. Based on recent form and squad quality, this game could offer good scoring chances.</p>
+        """
+
+    ai_content = intro_fallback + previews_fallback
 
 # ==============================
 # TAGS
@@ -200,12 +193,10 @@ links_html = "<br>".join(
 )
 
 # ==============================
-# BUILD HTML
+# BUILD TABLE HTML
 # ==============================
 
-html = f"""
-{intro_text}
-
+table_html = """
 <table id="free-tip">
 <thead>
 <tr>
@@ -220,7 +211,7 @@ html = f"""
 """
 
 for m in matches:
-    html += f"""
+    table_html += f"""
     <tr>
     <td>{m['time']}</td>
     <td>{m['league']}</td>
@@ -230,13 +221,21 @@ for m in matches:
     </tr>
     """
 
-html += f"""
+table_html += """
 </tbody>
 </table>
+"""
+
+# ==============================
+# FINAL HTML
+# ==============================
+
+html = f"""
+{ai_content}
 
 <br>
 
-{match_previews_html}
+{table_html}
 
 <br>
 <h3 class="links-per-post">Useful Links:</h3>
