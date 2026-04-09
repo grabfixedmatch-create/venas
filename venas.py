@@ -12,7 +12,6 @@ from urllib3.util.retry import Retry
 # ==============================
 # WORDPRESS CONFIG
 # ==============================
-
 WP_POST_URL = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
@@ -24,7 +23,6 @@ CATEGORY_IDS = [3764, 3886]
 # ==============================
 # CREATE SESSION WITH RETRIES
 # ==============================
-
 def create_session():
     session = requests.Session()
     retries = Retry(
@@ -42,14 +40,50 @@ session = create_session()
 # ==============================
 # FORMAT TODAY'S DATE
 # ==============================
-
 today = datetime.now()
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
+# AI INTRO GENERATION (Google GenAI)
+# ==============================
+AI_KEY = "AIzaSyAX9_hl_0yVTv4TcxytCuDzVGEMORfS3lM"
+AI_MODEL = "text-bison-001"
+AI_URL = f"https://genai.google/api/v1beta2/models/{AI_MODEL}:generateText"
+
+def generate_intro():
+    max_retries = 3
+    wait_seconds = 300  # 5 min between retries
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(
+                AI_URL,
+                headers={
+                    "Authorization": f"Bearer {AI_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "prompt": "Write a 150-200 character introduction for today's football predictions on Thursday, 09/04/2026."
+                },
+                timeout=60  # wait up to 60 seconds
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("output", {}).get("content", "Today's football predictions for Thursday, 09/04/2026 include exciting matches across multiple competitions.")
+        except Exception as e:
+            print(f"⚠️ AI intro generation failed (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                print(f"⏳ Waiting {wait_seconds} seconds before retry...")
+                time.sleep(wait_seconds)
+            else:
+                print("⚠️ Using default intro due to repeated AI failures.")
+                return "Today's football predictions for Thursday, 09/04/2026 include exciting matches across multiple competitions."
+
+intro_text = generate_intro()
+html_intro = f"<p>{intro_text}</p>"
+
+# ==============================
 # SCRAPE VENASBET
 # ==============================
-
 VENASBET_URL = "https://www.venasbet.com/"
 
 response = session.get(VENASBET_URL)
@@ -66,7 +100,6 @@ fixed_tags = [
     "venasbet prediction",
     "venasbet prediction for today and tomorrow"
 ]
-
 tags_to_add.extend(fixed_tags)
 
 if table:
@@ -78,10 +111,8 @@ if table:
 
     for row in rows:
         cols = [td.get_text(strip=True, separator=" ") for td in row.find_all("td")]
-
         if len(cols) == 4:
             team_text = cols[2]
-
             search_query = quote_plus(team_text + " result")
             result_link = f'<a href="https://www.google.com/search?q={search_query}" target="_blank">Check</a>'
 
@@ -96,16 +127,13 @@ if table:
 # ==============================
 # GENERATE TAGS FROM TEAMS
 # ==============================
-
 for match in matches:
     teams = match["teams"].replace("VS", "|").split("|")
-
     for team in teams:
         team = team.strip()
         if team:
             if team not in tags_to_add:
                 tags_to_add.append(team)
-
             fixed_tag = f"{team} Fixed Matches"
             if fixed_tag not in tags_to_add:
                 tags_to_add.append(fixed_tag)
@@ -113,7 +141,6 @@ for match in matches:
 # ==============================
 # LOAD RANDOM USEFUL LINKS
 # ==============================
-
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 
 response = session.get(GITHUB_LINKS_URL)
@@ -128,41 +155,9 @@ links_html = "<br>".join(
 )
 
 # ==============================
-# GENERATE INTRODUCTION VIA GOOGLE GENAI
+# BUILD POST HTML
 # ==============================
-
-DEFAULT_INTRO = f"<p>Today's football predictions for {formatted_date} include carefully selected matches based on team form and recent performances.</p>"
-
-intro_html = DEFAULT_INTRO
-
-try:
-    GENAI_API_KEY = "AIzaSyAX9_hl_0yVTv4TcxytCuDzVGEMORfS3lM"
-    response = requests.post(
-        "https://genai.google/api/v1beta2/models/text-bison-001:generateText",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GENAI_API_KEY}"
-        },
-        json={
-            "prompt": f"Write a 150-200 character introduction for a daily football tips post for {formatted_date}.",
-            "temperature": 0.7,
-            "maxOutputTokens": 120
-        }
-    )
-
-    data = response.json()
-    if "candidates" in data and len(data["candidates"]) > 0:
-        intro_text = data["candidates"][0]["content"]
-        intro_html = f"<p>{intro_text}</p>"
-
-except Exception as e:
-    print(f"⚠️ AI intro generation failed, using default: {e}")
-
-# ==============================
-# BUILD POST HTML (ONLY INTRO + TABLE)
-# ==============================
-
-html = intro_html + """
+html = html_intro + """
 <table id="free-tip">
     <thead>
         <tr>
@@ -199,7 +194,6 @@ html += f"""
 # ==============================
 # ENSURE TAGS EXIST IN WP
 # ==============================
-
 tag_ids = []
 
 for tag_name in tags_to_add:
@@ -215,7 +209,6 @@ for tag_name in tags_to_add:
         if data:
             tag_ids.append(data[0]["id"])
         else:
-            # Create new tag
             resp = session.post(
                 WP_TAGS_URL,
                 auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
@@ -233,7 +226,6 @@ for tag_name in tags_to_add:
 # ==============================
 # CREATE WORDPRESS POST
 # ==============================
-
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
@@ -249,6 +241,6 @@ response = session.post(
 )
 
 if response.status_code == 201:
-    print("✅ Post created successfully!")
+    print("✅ Post created successfully in multiple categories!")
 else:
     print("❌ Failed to create post:", response.text)
