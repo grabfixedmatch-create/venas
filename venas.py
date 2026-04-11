@@ -18,6 +18,7 @@ WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 CATEGORY_IDS = [3764, 3886]
 
@@ -54,7 +55,7 @@ intro_text = f"<p>Today's football predictions for {formatted_date} include care
 
 try:
     import google.genai as genai
-    client = genai.Client(api_key="AIzaSyB98tmGTMYfdSGjsnbAbaCpVDv8518J1Gg")
+    client = genai.Client(api_key=GOOGLE_API_KEY)
 
     # Wait up to 3 minutes (180 seconds)
     start_time = time.time()
