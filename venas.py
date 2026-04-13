@@ -156,7 +156,7 @@ Instructions:
 - Focus on form, team performance, trends, and statistics
 - 50-70 words per match
 - Make each analysis unique
-- If possible, include soccer-prediction related keywords and make them bold in <strong> tag
+- Include soccer-prediction related keywords and make them bold in <strong> tag
 - Use HTML format:
 
 <h4>Team vs Team</h4>
