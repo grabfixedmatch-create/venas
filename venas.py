@@ -1,6 +1,7 @@
 import os
 import time
 import random
+import signal
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
@@ -8,6 +9,15 @@ from requests.auth import HTTPBasicAuth
 from urllib.parse import quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# ==============================
+# GLOBAL TIMEOUT (5 MIN MAX)
+# ==============================
+def timeout_handler(signum, frame):
+    raise Exception("⏰ Script timeout reached")
+
+signal.signal(signal.SIGALRM, timeout_handler)
+signal.alarm(300)
 
 # ==============================
 # WORDPRESS CONFIG
@@ -26,14 +36,14 @@ if not USERNAME or not APP_PASSWORD:
     raise ValueError("Missing WordPress credentials")
 
 # ==============================
-# SESSION
+# SESSION (FASTER RETRIES)
 # ==============================
 
 def create_session():
     session = requests.Session()
     retries = Retry(
-        total=5,
-        backoff_factor=2,
+        total=3,
+        backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET", "POST"]
     )
@@ -73,12 +83,12 @@ except Exception as e:
     print(f"⚠️ AI intro failed: {e}")
 
 # ==============================
-# SCRAPE
+# SCRAPE (WITH TIMEOUT)
 # ==============================
 
 VENASBET_URL = "https://www.venasbet.com/"
 
-response = session.get(VENASBET_URL)
+response = session.get(VENASBET_URL, timeout=15)
 response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
@@ -115,7 +125,7 @@ if table:
             })
 
 # ==============================
-# TAGS
+# TAGS PREP
 # ==============================
 
 for match in matches:
@@ -130,7 +140,7 @@ for match in matches:
                 tags_to_add.append(fixed_tag)
 
 # ==============================
-# ANALYSIS (ONE AI CALL)
+# ANALYSIS (AI)
 # ==============================
 
 analysis_html = "<br><h2>Match Previews & Analysis</h2>"
@@ -152,13 +162,8 @@ Matches:
 
 Instructions:
 - DO NOT give predictions
-- DO NOT repeat betting tips
-- Focus on form, team performance, trends, and statistics
 - 50-70 words per match
-- Make each analysis unique
-- Include soccer-prediction related keywords and make them bold in <strong> tag
 - Use HTML format:
-
 <h4>Team vs Team</h4>
 <p>analysis...</p>
 """
@@ -175,12 +180,12 @@ Instructions:
         print(f"⚠️ Analysis failed: {e}")
 
 # ==============================
-# LINKS
+# LINKS (WITH TIMEOUT)
 # ==============================
 
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
 
-response = session.get(GITHUB_LINKS_URL)
+response = session.get(GITHUB_LINKS_URL, timeout=15)
 response.raise_for_status()
 
 all_links = [line.strip() for line in response.text.splitlines() if line.strip()]
@@ -216,16 +221,13 @@ for m in matches:
 <td>{m['league']}</td>
 <td>{m['teams']}</td>
 <td>{m['prediction']}</td>
-<td class="">{m['result']}</td>
+<td>{m['result']}</td>
 </tr>
 """
 
 html += "</tbody></table>"
-
-# ✅ Add analysis
 html += analysis_html
 
-# ✅ Add links
 html += f"""
 <br>
 <h3 class="links-per-post">Useful Links:</h3>
@@ -233,7 +235,7 @@ html += f"""
 """
 
 # ==============================
-# TAGS → WP
+# TAGS → WP (FAST)
 # ==============================
 
 tag_ids = []
@@ -243,7 +245,8 @@ for tag_name in tags_to_add:
         resp = session.get(
             WP_TAGS_URL,
             params={"search": tag_name},
-            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
+            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
+            timeout=15
         )
         resp.raise_for_status()
         data = resp.json()
@@ -254,12 +257,13 @@ for tag_name in tags_to_add:
             resp = session.post(
                 WP_TAGS_URL,
                 auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
-                json={"name": tag_name}
+                json={"name": tag_name},
+                timeout=15
             )
             resp.raise_for_status()
             tag_ids.append(resp.json()["id"])
 
-        time.sleep(random.uniform(1.2, 2.5))
+        time.sleep(0.2)  # 🔥 reduced from ~2 sec
 
     except requests.exceptions.RequestException as e:
         print(f"⚠️ Tag error '{tag_name}': {e}")
@@ -279,7 +283,8 @@ post_data = {
 response = session.post(
     WP_POST_URL,
     json=post_data,
-    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD)
+    auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
+    timeout=15
 )
 
 if response.status_code == 201:
