@@ -24,7 +24,6 @@ signal.alarm(300)
 # ==============================
 
 WP_POST_URL = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
-WP_TAGS_URL = "https://grabfixedmatch.com/wp-json/wp/v2/tags"
 
 USERNAME = os.environ.get("WP_USERNAME")
 APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
@@ -36,7 +35,7 @@ if not USERNAME or not APP_PASSWORD:
     raise ValueError("Missing WordPress credentials")
 
 # ==============================
-# SESSION (FASTER RETRIES)
+# SESSION
 # ==============================
 
 def create_session():
@@ -83,7 +82,7 @@ except Exception as e:
     print(f"⚠️ AI intro failed: {e}")
 
 # ==============================
-# SCRAPE (WITH TIMEOUT)
+# SCRAPE
 # ==============================
 
 VENASBET_URL = "https://www.venasbet.com/"
@@ -95,10 +94,6 @@ soup = BeautifulSoup(response.text, "html.parser")
 table = soup.find("table", class_="table table-striped text-center mastro-tips")
 
 matches = []
-tags_to_add = [
-    "venasbet prediction",
-    "venasbet prediction for today and tomorrow"
-]
 
 if table:
     tbody = table.find("tbody")
@@ -125,21 +120,6 @@ if table:
             })
 
 # ==============================
-# TAGS PREP
-# ==============================
-
-for match in matches:
-    teams = match["teams"].replace("VS", "|").split("|")
-    for team in teams:
-        team = team.strip()
-        if team:
-            if team not in tags_to_add:
-                tags_to_add.append(team)
-            fixed_tag = f"{team} Fixed Matches"
-            if fixed_tag not in tags_to_add:
-                tags_to_add.append(fixed_tag)
-
-# ==============================
 # ANALYSIS (AI)
 # ==============================
 
@@ -162,8 +142,13 @@ Matches:
 
 Instructions:
 - DO NOT give predictions
+- DO NOT repeat betting tips
+- Focus on form, team performance, trends, and statistics
 - 50-70 words per match
+- Make each analysis unique
+- Include soccer-prediction related keywords and make them bold in <strong> tag
 - Use HTML format:
+
 <h4>Team vs Team</h4>
 <p>analysis...</p>
 """
@@ -180,7 +165,7 @@ Instructions:
         print(f"⚠️ Analysis failed: {e}")
 
 # ==============================
-# LINKS (WITH TIMEOUT)
+# LINKS
 # ==============================
 
 GITHUB_LINKS_URL = "https://raw.githubusercontent.com/grabfixedmatch-create/venas/main/football_links.txt"
@@ -221,7 +206,7 @@ for m in matches:
 <td>{m['league']}</td>
 <td>{m['teams']}</td>
 <td>{m['prediction']}</td>
-<td>{m['result']}</td>
+<td class="">{m['result']}</td>
 </tr>
 """
 
@@ -235,48 +220,13 @@ html += f"""
 """
 
 # ==============================
-# TAGS → WP (FAST)
-# ==============================
-
-tag_ids = []
-
-for tag_name in tags_to_add:
-    try:
-        resp = session.get(
-            WP_TAGS_URL,
-            params={"search": tag_name},
-            auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
-            timeout=15
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        if data:
-            tag_ids.append(data[0]["id"])
-        else:
-            resp = session.post(
-                WP_TAGS_URL,
-                auth=HTTPBasicAuth(USERNAME, APP_PASSWORD),
-                json={"name": tag_name},
-                timeout=15
-            )
-            resp.raise_for_status()
-            tag_ids.append(resp.json()["id"])
-
-        time.sleep(0.2)  # 🔥 reduced from ~2 sec
-
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ Tag error '{tag_name}': {e}")
-
-# ==============================
-# CREATE POST
+# CREATE POST (NO TAGS)
 # ==============================
 
 post_data = {
     "title": f"⚽ Fixed matches predictions, {formatted_date}",
     "content": html,
     "status": "publish",
-    "tags": tag_ids,
     "categories": CATEGORY_IDS
 }
 
