@@ -13,18 +13,15 @@ post_id = 397
 username = os.environ.get("WP_USERNAME")
 app_password = os.environ.get("WP_APP_PASSWORD")
 
-# Create cloudscraper session
+# --- Cloudscraper ---
 scraper = cloudscraper.create_scraper(
-    browser={
-        "browser": "chrome",
-        "platform": "windows",
-        "mobile": False
-    }
+    browser={"browser": "chrome", "platform": "windows", "mobile": False}
 )
 
+# --- Fetch with retries ---
 def fetch_with_retries(url, retries=5, delay=5):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "User-Agent": "Mozilla/5.0",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://www.google.com/"
     }
@@ -48,6 +45,7 @@ def fetch_with_retries(url, retries=5, delay=5):
     raise Exception("❌ Failed to fetch data after retries")
 
 
+# --- Odds converter ---
 def american_to_decimal(odd):
     odd = str(odd).replace(",", "").strip()
     if odd in ["-", ""]:
@@ -57,31 +55,27 @@ def american_to_decimal(odd):
     except ValueError:
         return None
 
-    if odd > 0:
-        return round((odd / 100) + 1, 2)
-    else:
-        return round((100 / abs(odd)) + 1, 2)
+    return round((odd / 100) + 1, 2) if odd > 0 else round((100 / abs(odd)) + 1, 2)
 
 
-# --- Fetch data ---
+# --- SCRAPE ---
 url = "https://redscores.com/football/yesterday-results"
 response = fetch_with_retries(url, retries=5, delay=10)
 
 soup = BeautifulSoup(response.text, "html.parser")
 
 rows = soup.find_all("tr", class_="table-data__stats-parent")
-filtered_rows = []
 
-for row in rows:
-    if row.find("span", class_="font-bold"):
-        filtered_rows.append(row)
-
-# --- Extract matches ---
 matches = []
+for row in rows:
+    if not row.find("span", class_="font-bold"):
+        continue
 
-for row in filtered_rows:
     teams = [span.get_text(strip=True) for span in row.select("span.team")]
-    game_name = f"{teams[0]} - {teams[1]}" if len(teams) >= 2 else None
+    if len(teams) < 2:
+        continue
+
+    game_name = f"{teams[0]} - {teams[1]}"
 
     score_tag = row.select_one("span.colored-value--score")
     score = score_tag.get_text(strip=True) if score_tag else None
@@ -104,9 +98,8 @@ for row in filtered_rows:
 
 print("Matches:", matches)
 
-# --- Filter valid matches ---
+# --- FILTER ---
 valid_matches = []
-
 for m in matches:
     if not m["score"] or not m["winner_odd"]:
         continue
@@ -114,7 +107,7 @@ for m in matches:
     try:
         home_goals, away_goals = [int(x.strip()) for x in m["score"].split("-")]
         odd = float(m["winner_odd"])
-    except ValueError:
+    except:
         continue
 
     if home_goals == away_goals:
@@ -125,7 +118,6 @@ for m in matches:
 
 print("Valid matches:", valid_matches)
 
-# --- Pick random match ---
 if not valid_matches:
     print("❌ No valid matches found")
     exit(0)
@@ -149,7 +141,7 @@ else:
 
 yesterday = (datetime.today() - timedelta(days=1)).strftime("%d.%m.%Y")
 
-# --- Build HTML ---
+# --- HTML ---
 html_output = f"""
 <div class="card_wrap">
     <div class="daily_match">
@@ -170,28 +162,49 @@ html_output = f"""
 </div>
 """
 
-# --- Update WordPress ---
-response = requests.get(f"{wp_url}/{post_id}", auth=HTTPBasicAuth(username, app_password))
+# --- GET RAW CONTENT ---
+response = requests.get(
+    f"{wp_url}/{post_id}",
+    auth=HTTPBasicAuth(username, app_password),
+    params={"context": "edit"}  # 🔥 IMPORTANT
+)
 response.raise_for_status()
 
 post_data = response.json()
-current_content = post_data["content"]["rendered"]
+current_content = post_data["content"]["raw"]
 
-container_start = '<div id="daily" class="card_parent card_parent_is--vip">'
+# --- PREVENT DUPLICATES ---
+match_string = f"{home_team} vs {away_team}"
+if match_string in current_content:
+    print("⚠️ Match already exists, skipping")
+    exit(0)
 
-if container_start in current_content:
-    new_content = current_content.replace(
-        container_start,
-        container_start + "\n" + html_output
+# --- INSERT ONLY IN FIRST CONTAINER ---
+container = '<div id="daily" class="card_parent card_parent_is--vip">'
+
+index = current_content.find(container)
+
+if index != -1:
+    insert_pos = index + len(container)
+
+    new_content = (
+        current_content[:insert_pos]
+        + "\n"
+        + html_output.strip()
+        + "\n"
+        + current_content[insert_pos:]
     )
 else:
+    print("⚠️ Container not found, prepending")
     new_content = html_output + "\n" + current_content
 
-update_payload = {"content": new_content}
+# --- CLEAN BAD HTML (IMPORTANT) ---
+new_content = re.sub(r"</p>\s*</div>\s*</p>", "</div>", new_content)
 
+# --- UPDATE POST ---
 response = requests.post(
     f"{wp_url}/{post_id}",
-    json=update_payload,
+    json={"content": new_content},
     auth=HTTPBasicAuth(username, app_password)
 )
 
@@ -199,5 +212,5 @@ if response.status_code in [200, 201]:
     print(f"✅ Post {post_id} updated successfully!")
     print("Updated post link:", response.json().get("link"))
 else:
-    print("❌ Failed to update post:", response.status_code)
+    print("❌ Failed:", response.status_code)
     print(response.text)
