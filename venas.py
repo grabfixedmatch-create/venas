@@ -159,7 +159,31 @@ Instructions:
         )
 
         if hasattr(response, "text"):
-            analysis_html += response.text
+
+            raw_html = response.text
+            soup = BeautifulSoup(raw_html, "html.parser")
+
+            accordion_html = '<div class="accordion">'
+
+            items = soup.find_all(["h4", "p"])
+
+            for i in range(0, len(items), 2):
+                title = items[i]
+                content = items[i+1] if i+1 < len(items) else None
+
+                if title and content:
+                    accordion_html += f"""
+                    <div class="accordion-item">
+                        <button class="accordion-header">{title.text}</button>
+                        <div class="accordion-content">
+                            {str(content)}
+                        </div>
+                    </div>
+                    """
+
+            accordion_html += "</div>"
+
+            analysis_html += accordion_html
 
     except Exception as e:
         print(f"⚠️ Analysis failed: {e}")
@@ -220,7 +244,7 @@ html += f"""
 """
 
 # ==============================
-# CREATE POST (NO TAGS)
+# CREATE POST
 # ==============================
 
 post_data = {
