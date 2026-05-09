@@ -27,7 +27,7 @@ signal.alarm(300)
 WP_XMLRPC = "https://grabfixedmatch.com/xmlrpc.php"
 
 USERNAME = os.environ.get("WP_USERNAME")
-PASSWORD = os.environ.get("WP_PASSWORD")
+PASSWORD = os.environ.get("WP_APP_PASSWORD")
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
