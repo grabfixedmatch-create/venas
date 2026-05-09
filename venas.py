@@ -214,7 +214,7 @@ Instructions:
 - DO NOT give predictions
 - DO NOT repeat betting tips
 - Focus on form, team performance, trends, and statistics
-- 50-70 words per match
+- 70-150 words per match
 - Make each analysis unique
 - Include soccer-prediction related keywords and make them bold in <strong> tag
 - Use HTML format:
@@ -326,7 +326,7 @@ for m in matches:
 <td>{m['league']}</td>
 <td>{m['teams']}</td>
 <td>{m['prediction']}</td>
-<td>{m['result']}</td>
+<td class="">{m['result']}</td>
 </tr>
 """
 
