@@ -369,21 +369,23 @@ Useful Links:
 # CREATE POST (XML-RPC)
 # ==============================
 
+# ==============================
+# CREATE POST (XML-RPC)
+# ==============================
+
 try:
 
     client = xmlrpc.client.ServerProxy(WP_XMLRPC)
 
     post_data = {
-        'post_type': 'post',
-        'post_status': 'publish',
-        'post_title': (
-            f"⚽ Fixed matches predictions, "
-            f"{formatted_date}"
-        ),
-        'post_content': html,
-        'terms': {
-            'category': CATEGORY_IDS
-        }
+        'title': f"⚽ Fixed matches predictions, {formatted_date}",
+
+        'description': html,
+
+        'categories': [
+            'Fixed Matches',
+            'Football Predictions'
+        ]
     }
 
     post_id = client.metaWeblog.newPost(
