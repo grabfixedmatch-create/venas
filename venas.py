@@ -1,11 +1,11 @@
 import os
-import time
 import random
 import signal
 import requests
+import xmlrpc.client
+
 from bs4 import BeautifulSoup
 from datetime import datetime
-from requests.auth import HTTPBasicAuth
 from urllib.parse import quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -21,18 +21,19 @@ signal.signal(signal.SIGALRM, timeout_handler)
 signal.alarm(300)
 
 # ==============================
-# WORDPRESS CONFIG
+# WORDPRESS CONFIG (XML-RPC)
 # ==============================
 
-WP_POST_URL = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
+WP_XMLRPC = "https://grabfixedmatch.com/xmlrpc.php"
 
 USERNAME = os.environ.get("WP_USERNAME")
-APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
+PASSWORD = os.environ.get("WP_PASSWORD")
+
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 CATEGORY_IDS = [3764, 3886]
 
-if not USERNAME or not APP_PASSWORD:
+if not USERNAME or not PASSWORD:
     raise ValueError("Missing WordPress credentials")
 
 # ==============================
@@ -40,25 +41,27 @@ if not USERNAME or not APP_PASSWORD:
 # ==============================
 
 def create_session():
+
     session = requests.Session()
 
     retries = Retry(
         total=3,
         backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST"]
+        allowed_methods=["GET"]
     )
 
     adapter = HTTPAdapter(max_retries=retries)
 
     session.mount("https://", adapter)
 
-    # ADD THIS
     session.headers.update({
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0 Safari/537.36"
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
         )
     })
 
@@ -71,6 +74,7 @@ session = create_session()
 # ==============================
 
 today = datetime.now()
+
 formatted_date = today.strftime("%A – %d/%m/%Y")
 
 # ==============================
@@ -85,6 +89,7 @@ intro_text = (
 )
 
 try:
+
     if GOOGLE_API_KEY:
 
         import google.genai as genai
@@ -112,7 +117,8 @@ except Exception as e:
 
 BETREKA_URL = "https://www.betrekatips.com/"
 
-response = session.get(BETREKA_URL, timeout=15)
+response = session.get(BETREKA_URL, timeout=20)
+
 response.raise_for_status()
 
 soup = BeautifulSoup(response.text, "html.parser")
@@ -128,12 +134,11 @@ if table:
 
     tbody = table.find("tbody")
 
-    # fallback if no tbody exists
     rows = tbody.find_all("tr") if tbody else table.find_all("tr")
 
     random.shuffle(rows)
 
-    # ONLY 4 RANDOM MATCHES
+    # SELECT ONLY 4 RANDOM MATCHES
     rows = rows[:4]
 
     for row in rows:
@@ -146,7 +151,10 @@ if table:
             prediction = ""
 
             # League
-            league_el = row.find("th", class_="social-left")
+            league_el = row.find(
+                "th",
+                class_="social-left"
+            )
 
             if league_el:
                 league = league_el.get_text(strip=True)
@@ -223,7 +231,7 @@ Instructions:
 - DO NOT give predictions
 - DO NOT repeat betting tips
 - Focus on form, team performance, trends, and statistics
-- 70-150 words per match
+- 50-70 words per match
 - Make each analysis unique
 - Include soccer-prediction related keywords and make them bold in <strong> tag
 - Use HTML format:
@@ -241,7 +249,10 @@ Instructions:
 
             raw_html = response.text
 
-            soup = BeautifulSoup(raw_html, "html.parser")
+            soup = BeautifulSoup(
+                raw_html,
+                "html.parser"
+            )
 
             accordion_html = '<div class="accordion">'
 
@@ -264,6 +275,7 @@ Instructions:
                         <button class="accordion-header">
                             {title.text}
                         </button>
+
                         <div class="accordion-content">
                             {str(content)}
                         </div>
@@ -288,7 +300,7 @@ GITHUB_LINKS_URL = (
 
 response = session.get(
     GITHUB_LINKS_URL,
-    timeout=15
+    timeout=20
 )
 
 response.raise_for_status()
@@ -304,10 +316,10 @@ selected_links = random.sample(
     min(3, len(all_links))
 )
 
-links_html = "<br>".join(
+links_html = "<br>".join([
     f'<a href="{link}" target="_blank">{link}</a>'
     for link in selected_links
-)
+])
 
 # ==============================
 # BUILD HTML
@@ -335,7 +347,7 @@ for m in matches:
 <td>{m['league']}</td>
 <td>{m['teams']}</td>
 <td>{m['prediction']}</td>
-<td class="">{m['result']}</td>
+<td>{m['result']}</td>
 </tr>
 """
 
@@ -345,32 +357,48 @@ html += analysis_html
 
 html += f"""
 <br>
-<h3 class="links-per-post">Useful Links:</h3>
+
+<h3 class="links-per-post">
+Useful Links:
+</h3>
+
 {links_html}
 """
 
 # ==============================
-# CREATE POST
+# CREATE POST (XML-RPC)
 # ==============================
 
-post_data = {
-    "title": f"⚽ Fixed matches predictions, {formatted_date}",
-    "content": html,
-    "status": "publish",
-    "categories": CATEGORY_IDS
-}
+try:
 
-response = session.post(
-    WP_POST_URL,
-    json=post_data,
-    auth=HTTPBasicAuth(
+    client = xmlrpc.client.ServerProxy(WP_XMLRPC)
+
+    post_data = {
+        'post_type': 'post',
+        'post_status': 'publish',
+        'post_title': (
+            f"⚽ Fixed matches predictions, "
+            f"{formatted_date}"
+        ),
+        'post_content': html,
+        'terms': {
+            'category': CATEGORY_IDS
+        }
+    }
+
+    post_id = client.metaWeblog.newPost(
+        '',
         USERNAME,
-        APP_PASSWORD
-    ),
-    timeout=15
-)
+        PASSWORD,
+        post_data,
+        True
+    )
 
-if response.status_code == 201:
-    print("✅ Post created successfully!")
-else:
-    print("❌ Failed:", response.text)
+    print(
+        f"✅ Post created successfully! "
+        f"ID: {post_id}"
+    )
+
+except Exception as e:
+
+    print(f"❌ Failed to create post: {e}")
