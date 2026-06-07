@@ -378,7 +378,7 @@ try:
     client = xmlrpc.client.ServerProxy(WP_XMLRPC)
 
     post_data = {
-        'title': f"⚽ Fixed matches predictions, {formatted_date}",
+        'title': f"Soccer predictions today, {formatted_date}",
 
         'description': html,
 
