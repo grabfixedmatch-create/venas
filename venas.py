@@ -100,7 +100,7 @@ try:
             model="gemini-3-flash-preview",
             contents=(
                 f"Write a short unique introduction "
-                f"(150-200 characters) for football "
+                f"(250-300 characters) for football "
                 f"predictions for {formatted_date}"
             )
         )
@@ -383,7 +383,6 @@ try:
         'description': html,
 
         'categories': [
-            'Fixed Matches',
             'Football Predictions'
         ]
     }
