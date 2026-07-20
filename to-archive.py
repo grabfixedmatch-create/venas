@@ -1,9 +1,9 @@
-# import requests
-# import os
+import requests
+import os
 import time
 import re
 import random
-# from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from requests.auth import HTTPBasicAuth
 import cloudscraper
