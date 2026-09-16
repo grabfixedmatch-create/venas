@@ -1,14 +1,13 @@
 import os
 import random
 import signal
-import requests
 import xmlrpc.client
 
 from bs4 import BeautifulSoup
 from datetime import datetime
 from urllib.parse import quote_plus
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+
+from playwright.sync_api import sync_playwright
 
 
 # ==============================
@@ -24,7 +23,7 @@ signal.alarm(300)
 
 
 # ==============================
-# WORDPRESS CONFIG (XML-RPC)
+# WORDPRESS CONFIG
 # ==============================
 
 WP_XMLRPC = "https://grabfixedmatch.com/xmlrpc.php"
@@ -38,66 +37,6 @@ CATEGORY_IDS = [3764, 3886]
 
 if not USERNAME or not PASSWORD:
     raise ValueError("Missing WordPress credentials")
-
-
-# ==============================
-# SESSION
-# ==============================
-
-def create_session():
-
-    session = requests.Session()
-
-    retries = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        status=3,
-        backoff_factor=2,
-        status_forcelist=[
-            403,
-            429,
-            500,
-            502,
-            503,
-            504
-        ],
-        allowed_methods=["GET"],
-        raise_on_status=False
-    )
-
-    adapter = HTTPAdapter(
-        max_retries=retries
-    )
-
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/140.0.0.0 Safari/537.36"
-        ),
-        "Accept": (
-            "text/html,application/xhtml+xml,"
-            "application/xml;q=0.9,image/avif,image/webp,"
-            "image/apng,*/*;q=0.8"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-    })
-
-    return session
-
-
-session = create_session()
 
 
 # ==============================
@@ -153,66 +92,134 @@ except Exception as e:
 
 BETREKA_URL = "https://www.betrekatips.com/"
 
-print("🌐 Fetching BetrekaTips...")
+matches = []
+
+print("🌐 Starting Chromium...")
 
 try:
 
-    response = session.get(
-        BETREKA_URL,
-        timeout=20
-    )
+    with sync_playwright() as p:
+
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ]
+        )
+
+        context = browser.new_context(
+            viewport={
+                "width": 1366,
+                "height": 768
+            },
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/140.0.0.0 Safari/537.36"
+            },
+            locale="en-US",
+            timezone_id="UTC",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9"
+            }
+        )
+
+        page = context.new_page()
+
+        print(
+            f"🌐 Opening {BETREKA_URL}..."
+        )
+
+        response = page.goto(
+            BETREKA_URL,
+            wait_until="domcontentloaded",
+            timeout=30000
+        )
+
+        if response:
+
+            print(
+                f"BetrekaTips HTTP status: "
+                f"{response.status}"
+            )
+
+        # Give JavaScript/challenges time to complete
+        page.wait_for_timeout(5000)
+
+        print(
+            f"📄 Page title: {page.title()}"
+        )
+
+        # Wait for the matches table
+        try:
+
+            page.wait_for_selector(
+                "table.matches-table.table-striped.table-hover",
+                timeout=15000
+            )
+
+        except Exception:
+
+            print(
+                "⚠️ Match table was not found "
+                "after waiting."
+            )
+
+            print(
+                "Current URL:",
+                page.url
+            )
+
+            print(
+                "Page title:",
+                page.title()
+            )
+
+            print(
+                "Page text preview:"
+            )
+
+            print(
+                page.locator("body").inner_text()[:2000]
+            )
+
+            browser.close()
+
+            raise Exception(
+                "BetrekaTips match table was not found."
+            )
+
+        # Get the final rendered HTML
+        html_content = page.content()
+
+        browser.close()
+
+
+except Exception as e:
 
     print(
-        f"BetrekaTips response status: "
-        f"{response.status_code}"
-    )
-
-    if response.status_code == 403:
-
-        print(
-            "⚠️ BetrekaTips returned HTTP 403."
-        )
-
-        print(
-            "Response preview:"
-        )
-
-        print(
-            response.text[:1000]
-        )
-
-        raise Exception(
-            "BetrekaTips blocked the request "
-            "with HTTP 403."
-        )
-
-    response.raise_for_status()
-
-except requests.exceptions.RequestException as e:
-
-    print(
-        f"❌ Failed to fetch BetrekaTips: {e}"
+        f"❌ Failed to scrape BetrekaTips: {e}"
     )
 
     raise
 
 
+# ==============================
+# PARSE RENDERED HTML
+# ==============================
+
 soup = BeautifulSoup(
-    response.text,
+    html_content,
     "html.parser"
 )
-
-
-# ==============================
-# FIND MATCH TABLE
-# ==============================
 
 table = soup.find(
     "table",
     class_="matches-table table-striped table-hover"
 )
-
-matches = []
 
 
 if table:
@@ -226,7 +233,7 @@ if table:
     )
 
     print(
-        f"📋 Found {len(rows)} rows."
+        f"📋 Found {len(rows)} match rows."
     )
 
     random.shuffle(rows)
@@ -326,14 +333,20 @@ if table:
 else:
 
     print(
-        "⚠️ BetrekaTips match table "
-        "was not found."
+        "⚠️ BetrekaTips table not found."
     )
 
 
 print(
     f"✅ Selected {len(matches)} matches."
 )
+
+
+if not matches:
+
+    raise Exception(
+        "❌ No matches were scraped from BetrekaTips."
+    )
 
 
 # ==============================
@@ -463,7 +476,9 @@ GITHUB_LINKS_URL = (
 
 try:
 
-    response = session.get(
+    import requests
+
+    response = requests.get(
         GITHUB_LINKS_URL,
         timeout=20
     )
@@ -534,9 +549,7 @@ for m in matches:
 
 html += "</tbody></table>"
 
-
 html += analysis_html
-
 
 html += f"""
 <br>
@@ -550,7 +563,7 @@ Useful Links:
 
 
 # ==============================
-# CREATE POST (XML-RPC)
+# CREATE WORDPRESS POST
 # ==============================
 
 try:
@@ -595,6 +608,8 @@ except Exception as e:
     print(
         f"❌ Failed to create post: {e}"
     )
+
+    raise
 
 
 # ==============================
