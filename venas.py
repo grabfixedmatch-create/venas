@@ -106,7 +106,7 @@ try:
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
 
@@ -119,7 +119,7 @@ try:
                 "Mozilla/5.0 (X11; Linux x86_64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/140.0.0.0 Safari/537.36"
-            },
+            ),
             locale="en-US",
             timezone_id="UTC",
             extra_http_headers={
@@ -146,7 +146,7 @@ try:
                 f"{response.status}"
             )
 
-        # Give JavaScript/challenges time to complete
+        # Allow JavaScript/challenges to execute
         page.wait_for_timeout(5000)
 
         print(
@@ -164,8 +164,7 @@ try:
         except Exception:
 
             print(
-                "⚠️ Match table was not found "
-                "after waiting."
+                "⚠️ Match table was not found."
             )
 
             print(
@@ -192,7 +191,7 @@ try:
                 "BetrekaTips match table was not found."
             )
 
-        # Get the final rendered HTML
+        # Get rendered HTML
         html_content = page.content()
 
         browser.close()
@@ -321,7 +320,7 @@ if table:
                     "league": league,
                     "teams": teams,
                     "prediction": prediction,
-                    "result": result_link,
+                    "result": result_link
                 })
 
         except Exception as e:
@@ -368,12 +367,10 @@ if GOOGLE_API_KEY and matches:
             api_key=GOOGLE_API_KEY
         )
 
-
         matches_text = "\n".join([
             f"{m['teams']} ({m['league']})"
             for m in matches
         ])
-
 
         prompt = f"""
 Write short football match analysis for each of these matches.
@@ -394,12 +391,10 @@ Instructions:
 <p>analysis...</p>
 """
 
-
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
             contents=prompt
         )
-
 
         if hasattr(response, "text") and response.text:
 
@@ -410,16 +405,13 @@ Instructions:
                 "html.parser"
             )
 
-
             accordion_html = (
                 '<div class="accordion">'
             )
 
-
             items = soup.find_all(
                 ["h4", "p"]
             )
-
 
             for i in range(
                 0,
@@ -435,7 +427,6 @@ Instructions:
                     else None
                 )
 
-
                 if title and content:
 
                     accordion_html += f"""
@@ -450,11 +441,9 @@ Instructions:
                     </div>
                     """
 
-
             accordion_html += "</div>"
 
             analysis_html += accordion_html
-
 
     except Exception as e:
 
@@ -485,26 +474,22 @@ try:
 
     response.raise_for_status()
 
-
     all_links = [
         line.strip()
         for line in response.text.splitlines()
         if line.strip()
     ]
 
-
     selected_links = random.sample(
         all_links,
         min(3, len(all_links))
     )
-
 
     links_html = "<br>".join([
         f'<a href="{link}" '
         f'target="_blank">{link}</a>'
         for link in selected_links
     ])
-
 
 except Exception as e:
 
@@ -572,9 +557,7 @@ try:
         WP_XMLRPC
     )
 
-
     post_data = {
-
         "title": (
             f"Soccer predictions today, "
             f"{formatted_date}"
@@ -587,7 +570,6 @@ try:
         ]
     }
 
-
     post_id = client.metaWeblog.newPost(
         "",
         USERNAME,
@@ -596,12 +578,10 @@ try:
         True
     )
 
-
     print(
         f"✅ Post created successfully! "
         f"ID: {post_id}"
     )
-
 
 except Exception as e:
 
