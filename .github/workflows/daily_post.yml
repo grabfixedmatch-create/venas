@@ -10,17 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'  # recommended for genai compatibility
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 google-genai
+          pip install requests beautifulsoup4 google-genai playwright
+
+      - name: Install Chromium
+        run: |
+          python -m playwright install --with-deps chromium
 
       - name: Run scraper
         run: python venas.py
