@@ -1,14 +1,14 @@
 import os
 import random
 import signal
+import requests
 import xmlrpc.client
 
 from bs4 import BeautifulSoup
 from datetime import datetime
 from urllib.parse import quote_plus
-
-from playwright.sync_api import sync_playwright
-
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ==============================
 # GLOBAL TIMEOUT (5 MIN MAX)
@@ -17,13 +17,11 @@ from playwright.sync_api import sync_playwright
 def timeout_handler(signum, frame):
     raise Exception("⏰ Script timeout reached")
 
-
 signal.signal(signal.SIGALRM, timeout_handler)
 signal.alarm(300)
 
-
 # ==============================
-# WORDPRESS CONFIG
+# WORDPRESS CONFIG (XML-RPC)
 # ==============================
 
 WP_XMLRPC = "https://grabfixedmatch.com/xmlrpc.php"
@@ -38,6 +36,38 @@ CATEGORY_IDS = [3764, 3886]
 if not USERNAME or not PASSWORD:
     raise ValueError("Missing WordPress credentials")
 
+# ==============================
+# SESSION
+# ==============================
+
+def create_session():
+
+    session = requests.Session()
+
+    retries = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+
+    adapter = HTTPAdapter(max_retries=retries)
+
+    session.mount("https://", adapter)
+
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        )
+    })
+
+    return session
+
+session = create_session()
 
 # ==============================
 # DATE
@@ -46,7 +76,6 @@ if not USERNAME or not PASSWORD:
 today = datetime.now()
 
 formatted_date = today.strftime("%A – %d/%m/%Y")
-
 
 # ==============================
 # INTRO (AI)
@@ -65,9 +94,7 @@ try:
 
         import google.genai as genai
 
-        client = genai.Client(
-            api_key=GOOGLE_API_KEY
-        )
+        client = genai.Client(api_key=GOOGLE_API_KEY)
 
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
@@ -82,280 +109,141 @@ try:
             intro_text = f"<p>{response.text}</p>"
 
 except Exception as e:
-
     print(f"⚠️ AI intro failed: {e}")
 
-
 # ==============================
-# SCRAPE BETREKA TIPS
+# SCRAPE BETENSURED TIPS
 # ==============================
 
-BETREKA_URL = "https://www.betrekatips.com/"
+BETENSURED_URL = "https://www.betensured.com/"
+
+response = session.get(BETENSURED_URL, timeout=20)
+
+response.raise_for_status()
+
+soup = BeautifulSoup(response.text, "html.parser")
+
+# Find the expert picks table
+table = soup.find("table", class_="expert-picks-table")
 
 matches = []
-
-print("🌐 Starting Chromium...")
-
-try:
-
-    with sync_playwright() as p:
-
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled"
-            ]
-        )
-
-        context = browser.new_context(
-            viewport={
-                "width": 1366,
-                "height": 768
-            },
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/140.0.0.0 Safari/537.36"
-            ),
-            locale="en-US",
-            timezone_id="UTC",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9"
-            }
-        )
-
-        page = context.new_page()
-
-        print(
-            f"🌐 Opening {BETREKA_URL}..."
-        )
-
-        response = page.goto(
-            BETREKA_URL,
-            wait_until="domcontentloaded",
-            timeout=30000
-        )
-
-        if response:
-
-            print(
-                f"BetrekaTips HTTP status: "
-                f"{response.status}"
-            )
-
-        # Allow JavaScript/challenges to execute
-        page.wait_for_timeout(5000)
-
-        print(
-            f"📄 Page title: {page.title()}"
-        )
-
-        # Wait for the matches table
-        try:
-
-            page.wait_for_selector(
-                "table.matches-table.table-striped.table-hover",
-                timeout=15000
-            )
-
-        except Exception:
-
-            print(
-                "⚠️ Match table was not found."
-            )
-
-            print(
-                "Current URL:",
-                page.url
-            )
-
-            print(
-                "Page title:",
-                page.title()
-            )
-
-            print(
-                "Page text preview:"
-            )
-
-            print(
-                page.locator("body").inner_text()[:2000]
-            )
-
-            browser.close()
-
-            raise Exception(
-                "BetrekaTips match table was not found."
-            )
-
-        # Get rendered HTML
-        html_content = page.content()
-
-        browser.close()
-
-
-except Exception as e:
-
-    print(
-        f"❌ Failed to scrape BetrekaTips: {e}"
-    )
-
-    raise
-
-
-# ==============================
-# PARSE RENDERED HTML
-# ==============================
-
-soup = BeautifulSoup(
-    html_content,
-    "html.parser"
-)
-
-table = soup.find(
-    "table",
-    class_="matches-table table-striped table-hover"
-)
-
 
 if table:
 
     tbody = table.find("tbody")
 
-    rows = (
-        tbody.find_all("tr")
-        if tbody
-        else table.find_all("tr")
-    )
+    rows = tbody.find_all("tr") if tbody else table.find_all("tr")
 
-    print(
-        f"📋 Found {len(rows)} match rows."
-    )
-
-    random.shuffle(rows)
-
-    # SELECT ONLY 4 RANDOM MATCHES
-    rows = rows[:4]
+    # Filter out locked rows (premium/members-only rows)
+    available_rows = []
 
     for row in rows:
+
+        # Skip rows that contain the lock icon (premium content)
+        if row.find("i", class_="fa-lock"):
+            continue
+
+        # Must have a .set-1 span (team name) to be a valid match row
+        if not row.find("span", class_="set-1"):
+            continue
+
+        available_rows.append(row)
+
+    # Shuffle and pick 4 random available matches
+    random.shuffle(available_rows)
+
+    selected_rows = available_rows[:4]
+
+    for row in selected_rows:
 
         try:
 
             league = ""
-            match_time = ""
             teams = ""
-            prediction = ""
+            ft_result = ""
+            expert_tip = ""
+            stats_url = ""
 
-            # ==============================
-            # LEAGUE
-            # ==============================
+            # League: <small> tag next to flag image
+            small_el = row.find("small")
 
-            league_el = row.find(
-                "th",
-                class_="social-left"
-            )
+            if small_el:
+                league = small_el.get_text(strip=True)
 
-            if league_el:
+            # Teams: inside .set-1 span
+            teams_el = row.find("span", class_="set-1")
 
-                league = league_el.get_text(
-                    strip=True
-                )
+            if teams_el:
+                teams = teams_el.get_text(strip=True)
 
+            # Stats link: first <a> inside the match name area
+            link_el = row.find("a", href=True)
 
-            # ==============================
-            # TIME
-            # ==============================
+            if link_el:
+                href = link_el.get("href", "")
+                if href.startswith("http"):
+                    stats_url = href
+                else:
+                    stats_url = "https://www.betensured.com" + href
 
-            ths = row.find_all("th")
-
-            if len(ths) > 1:
-
-                match_time = ths[1].get_text(
-                    strip=True
-                )
-
-
-            # ==============================
-            # TEAMS / PREDICTION
-            # ==============================
-
+            # All <td> elements in this row
             tds = row.find_all("td")
 
+            # Expert Tip: look for <span style="color: red"><b>
+            for td in tds:
+                red_span = td.find("span", style=lambda s: s and "color: red" in s)
+                if red_span:
+                    b_tag = red_span.find("b")
+                    if b_tag:
+                        expert_tip = b_tag.get_text(strip=True)
+                    break
+
+            # FT (Outcome): second <td> containing a standalone <b>
+            # It's the td right after the teams td (index 1 in visible tds)
             if len(tds) >= 2:
+                b_tag = tds[1].find("b")
+                if b_tag:
+                    ft_result = b_tag.get_text(strip=True)
 
-                teams = tds[0].get_text(
-                    separator=" ",
-                    strip=True
+            # Google result link for this match
+            search_query = quote_plus(teams + " result")
+
+            result_link = (
+                f'<a href="https://www.google.com/search?q={search_query}" '
+                f'target="_blank">Check</a>'
+            )
+
+            # Stats link from betensured
+            if stats_url:
+                stats_link = (
+                    f'<a href="{stats_url}" '
+                    f'target="_blank">Stats</a>'
                 )
+            else:
+                stats_link = ""
 
-                teams = " ".join(
-                    teams.split()
-                )
-
-                prediction = tds[1].get_text(
-                    strip=True
-                )
-
-
-                # ==============================
-                # GOOGLE RESULT LINK
-                # ==============================
-
-                search_query = quote_plus(
-                    teams + " result"
-                )
-
-                result_link = (
-                    f'<a href="https://www.google.com/search?q='
-                    f'{search_query}" '
-                    f'target="_blank">Check</a>'
-                )
-
+            if teams and expert_tip:
 
                 matches.append({
-                    "time": match_time,
                     "league": league,
                     "teams": teams,
-                    "prediction": prediction,
-                    "result": result_link
+                    "tip": expert_tip,
+                    "ft": ft_result,
+                    "result": result_link,
+                    "stats": stats_link,
                 })
 
         except Exception as e:
-
-            print(
-                f"⚠️ Error parsing row: {e}"
-            )
-
-else:
-
-    print(
-        "⚠️ BetrekaTips table not found."
-    )
-
-
-print(
-    f"✅ Selected {len(matches)} matches."
-)
-
+            print(f"⚠️ Error parsing row: {e}")
 
 if not matches:
-
-    raise Exception(
-        "❌ No matches were scraped from BetrekaTips."
-    )
-
+    print("⚠️ No matches scraped from betensured.com")
 
 # ==============================
 # ANALYSIS (AI)
 # ==============================
 
-analysis_html = (
-    "<br><h2>Match Previews & Analysis</h2>"
-)
-
+analysis_html = "<br><h2>Match Previews & Analysis</h2>"
 
 if GOOGLE_API_KEY and matches:
 
@@ -363,9 +251,7 @@ if GOOGLE_API_KEY and matches:
 
         import google.genai as genai
 
-        client = genai.Client(
-            api_key=GOOGLE_API_KEY
-        )
+        client = genai.Client(api_key=GOOGLE_API_KEY)
 
         matches_text = "\n".join([
             f"{m['teams']} ({m['league']})"
@@ -405,19 +291,11 @@ Instructions:
                 "html.parser"
             )
 
-            accordion_html = (
-                '<div class="accordion">'
-            )
+            accordion_html = '<div class="accordion">'
 
-            items = soup.find_all(
-                ["h4", "p"]
-            )
+            items = soup.find_all(["h4", "p"])
 
-            for i in range(
-                0,
-                len(items),
-                2
-            ):
+            for i in range(0, len(items), 2):
 
                 title = items[i]
 
@@ -446,11 +324,7 @@ Instructions:
             analysis_html += accordion_html
 
     except Exception as e:
-
-        print(
-            f"⚠️ Analysis failed: {e}"
-        )
-
+        print(f"⚠️ Analysis failed: {e}")
 
 # ==============================
 # LINKS
@@ -458,47 +332,31 @@ Instructions:
 
 GITHUB_LINKS_URL = (
     "https://raw.githubusercontent.com/"
-    "grabfixedmatch-create/venas/main/"
-    "football_links.txt"
+    "grabfixedmatch-create/venas/main/football_links.txt"
 )
 
+response = session.get(
+    GITHUB_LINKS_URL,
+    timeout=20
+)
 
-try:
+response.raise_for_status()
 
-    import requests
+all_links = [
+    line.strip()
+    for line in response.text.splitlines()
+    if line.strip()
+]
 
-    response = requests.get(
-        GITHUB_LINKS_URL,
-        timeout=20
-    )
+selected_links = random.sample(
+    all_links,
+    min(3, len(all_links))
+)
 
-    response.raise_for_status()
-
-    all_links = [
-        line.strip()
-        for line in response.text.splitlines()
-        if line.strip()
-    ]
-
-    selected_links = random.sample(
-        all_links,
-        min(3, len(all_links))
-    )
-
-    links_html = "<br>".join([
-        f'<a href="{link}" '
-        f'target="_blank">{link}</a>'
-        for link in selected_links
-    ])
-
-except Exception as e:
-
-    print(
-        f"⚠️ Failed to fetch GitHub links: {e}"
-    )
-
-    links_html = ""
-
+links_html = "<br>".join([
+    f'<a href="{link}" target="_blank">{link}</a>'
+    for link in selected_links
+])
 
 # ==============================
 # BUILD HTML
@@ -508,7 +366,6 @@ html = intro_text + """
 <table id="free-tip">
 <thead>
 <tr>
-<th>Time</th>
 <th>League</th>
 <th>Teams</th>
 <th>Tip</th>
@@ -518,19 +375,16 @@ html = intro_text + """
 <tbody>
 """
 
-
 for m in matches:
 
     html += f"""
 <tr>
-<td>{m['time']}</td>
 <td>{m['league']}</td>
 <td>{m['teams']}</td>
-<td>{m['prediction']}</td>
+<td>{m['tip']}</td>
 <td>{m['result']}</td>
 </tr>
 """
-
 
 html += "</tbody></table>"
 
@@ -546,32 +400,26 @@ Useful Links:
 {links_html}
 """
 
-
 # ==============================
-# CREATE WORDPRESS POST
+# CREATE POST (XML-RPC)
 # ==============================
 
 try:
 
-    client = xmlrpc.client.ServerProxy(
-        WP_XMLRPC
-    )
+    client = xmlrpc.client.ServerProxy(WP_XMLRPC)
 
     post_data = {
-        "title": (
-            f"Soccer predictions today, "
-            f"{formatted_date}"
-        ),
+        'title': f"Soccer predictions today, {formatted_date}",
 
-        "description": html,
+        'description': html,
 
-        "categories": [
-            "Football Predictions"
+        'categories': [
+            'Football Predictions'
         ]
     }
 
     post_id = client.metaWeblog.newPost(
-        "",
+        '',
         USERNAME,
         PASSWORD,
         post_data,
@@ -585,17 +433,4 @@ try:
 
 except Exception as e:
 
-    print(
-        f"❌ Failed to create post: {e}"
-    )
-
-    raise
-
-
-# ==============================
-# END
-# ==============================
-
-signal.alarm(0)
-
-print("🏁 Script finished.")
+    print(f"❌ Failed to create post: {e}")
