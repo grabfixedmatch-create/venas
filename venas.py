@@ -9,6 +9,7 @@ import xmlrpc.client
 import cloudscraper
 from bs4 import BeautifulSoup
 from datetime import datetime
+from html import escape
 from urllib.parse import quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -28,6 +29,7 @@ signal.alarm(480)
 # ==============================
 
 WP_XMLRPC = "https://grabfixedmatch.com/xmlrpc.php"
+SOURCE_URL = "https://www.tips180.com/"
 
 USERNAME = os.environ.get("WP_USERNAME")
 PASSWORD = os.environ.get("WP_APP_PASSWORD")
@@ -36,7 +38,9 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 # Optional: e.g. http://user:pass@host:port (set as a GitHub secret)
 PROXY_URL = os.environ.get("PROXY_URL")
 
-CATEGORY_IDS = [3764, 3886]
+# How many matches get an AI preview in the accordion (the table lists ALL picks).
+# Set to None to write a preview for every match.
+MAX_ANALYSIS = 10
 
 if not USERNAME or not PASSWORD:
     raise ValueError("Missing WordPress credentials")
@@ -89,8 +93,9 @@ if PROXY_URL:
     scraper.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
 
 
-def fetch_html(url, must_contain=None, attempts=5, delay=8):
-    """Fetch a page with cloudscraper, then plain session, with backoff."""
+def fetch_html(url, validator=None, attempts=5, delay=8):
+    """Fetch a page with cloudscraper, then plain session, with backoff.
+    `validator(text) -> bool` confirms the page really contains what we need."""
     clients = [("cloudscraper", scraper), ("requests", session)]
 
     for i in range(attempts):
@@ -102,19 +107,20 @@ def fetch_html(url, must_contain=None, attempts=5, delay=8):
                 "Referer": "https://www.google.com/",
             })
 
-            if resp.status_code == 200 and (
-                must_contain is None or must_contain in resp.text
-            ):
-                return resp.text
-
-            print(f"⚠️ Attempt {i+1} ({name}) failed: status {resp.status_code}")
+            if resp.status_code == 200:
+                if validator is None or validator(resp.text):
+                    return resp.text
+                print(f"⚠️ Attempt {i+1} ({name}): status 200 but expected table not found")
+            else:
+                print(f"⚠️ Attempt {i+1} ({name}) failed: status {resp.status_code}")
 
         except Exception as e:
             print(f"⚠️ Attempt {i+1} ({name}) error: {e}")
 
-        sleep_time = delay * (i + 1) + random.uniform(1, 3)
-        print(f"⏳ Retrying in {round(sleep_time, 1)} sec...")
-        time.sleep(sleep_time)
+        if i < attempts - 1:
+            sleep_time = delay * (i + 1) + random.uniform(1, 3)
+            print(f"⏳ Retrying in {round(sleep_time, 1)} sec...")
+            time.sleep(sleep_time)
 
     return None
 
@@ -134,6 +140,20 @@ def strip_code_fences(text):
     text = re.sub(r"^```(?:html)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
+
+
+def find_picks_table(soup):
+    """The 'Today's Predictions' table has Tip + Odds headers.
+    (The 'Recent Winning Tips' table has Tip + Result, so it is ignored.)"""
+    for table in soup.find_all("table"):
+        headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
+        if "tip" in headers and "odds" in headers:
+            return table
+    return None
+
+
+def has_picks_table(page_text):
+    return find_picks_table(BeautifulSoup(page_text, "html.parser")) is not None
 
 # ==============================
 # INTRO (AI)
@@ -168,106 +188,90 @@ except Exception as e:
     print(f"⚠️ AI intro failed: {e}")
 
 # ==============================
-# SCRAPE BETENSURED TIPS
+# SCRAPE TIPS180 PICKS
 # ==============================
 
-BETENSURED_URL = "https://www.betensured.com/"
-
-page_html = fetch_html(BETENSURED_URL, must_contain="expert-picks-table")
+page_html = fetch_html(SOURCE_URL, validator=has_picks_table)
 
 if not page_html:
-    print("❌ Could not fetch betensured.com (likely Cloudflare blocking). Aborting without posting.")
+    print("❌ Could not fetch the picks table from tips180.com. Aborting without posting.")
     raise SystemExit(1)
 
 soup = BeautifulSoup(page_html, "html.parser")
-
-table = soup.find("table", class_="expert-picks-table")
+table = find_picks_table(soup)
 
 matches = []
+seen = set()
 
-if table:
-    tbody = table.find("tbody")
-    rows = tbody.find_all("tr") if tbody else table.find_all("tr")
+# Each pick is its own <tbody>: one data row (5 cells) + one row with the full league name
+for tbody in table.find_all("tbody"):
+    data_row = None
+    league_full = ""
 
-    available_rows = []
+    for tr in tbody.find_all("tr"):
+        tds = tr.find_all("td", recursive=False)
 
-    for row in rows:
-        # Skip locked (premium) rows
-        if row.find("i", class_="fa-lock"):
+        if len(tds) >= 5 and data_row is None:
+            data_row = tr
+        elif len(tds) == 1 and tds[0].get("colspan"):
+            league_full = tds[0].get_text(strip=True)
+
+    if data_row is None:
+        continue
+
+    try:
+        tds = data_row.find_all("td", recursive=False)
+
+        # League short label: flag image alt text, or a text badge (e.g. "FRA L3")
+        img = tds[0].find("img")
+        league_short = (
+            img.get("alt", "").strip() if img else tds[0].get_text(strip=True)
+        )
+        league = league_full or league_short
+
+        # Match: first <p> = teams, second <p> = date/time
+        ps = tds[1].find_all("p")
+        teams = ps[0].get_text(strip=True) if ps else tds[1].get_text(" ", strip=True)
+        kickoff = ps[1].get_text(strip=True) if len(ps) > 1 else ""
+
+        tip = tds[2].get_text(strip=True)
+        odds = tds[3].get_text(strip=True)
+        score = tds[4].get_text(strip=True)
+
+        if not teams or not tip or tip in ("?", "-"):
             continue
 
-        # Must have a .set-1 span (team name)
-        if not row.find("span", class_="set-1"):
+        key = (teams.lower(), tip.lower())
+        if key in seen:
             continue
+        seen.add(key)
 
-        available_rows.append(row)
+        search_query = quote_plus(teams + " result")
+        result_link = (
+            f'<a href="https://www.google.com/search?q={search_query}" '
+            f'target="_blank">Check</a>'
+        )
 
-    random.shuffle(available_rows)
-    selected_rows = available_rows[:4]
+        matches.append({
+            "league": league,
+            "teams": teams,
+            "tip": tip,
+            "odds": odds,
+            "kickoff": kickoff,
+            "score": score,
+            "result": result_link,
+        })
 
-    for row in selected_rows:
-        try:
-            league = ""
-            teams = ""
-            ft_result = ""
-            expert_tip = ""
-            stats_url = ""
+    except Exception as e:
+        print(f"⚠️ Error parsing row: {e}")
 
-            small_el = row.find("small")
-            if small_el:
-                league = small_el.get_text(strip=True)
+# Shuffle ALL picks (no limit)
+random.shuffle(matches)
 
-            teams_el = row.find("span", class_="set-1")
-            if teams_el:
-                teams = teams_el.get_text(strip=True)
-
-            link_el = row.find("a", href=True)
-            if link_el:
-                href = link_el.get("href", "")
-                stats_url = href if href.startswith("http") else "https://www.betensured.com" + href
-
-            tds = row.find_all("td")
-
-            for td in tds:
-                red_span = td.find("span", style=lambda s: s and "color: red" in s)
-                if red_span:
-                    b_tag = red_span.find("b")
-                    if b_tag:
-                        expert_tip = b_tag.get_text(strip=True)
-                    break
-
-            if len(tds) >= 2:
-                b_tag = tds[1].find("b")
-                if b_tag:
-                    ft_result = b_tag.get_text(strip=True)
-
-            search_query = quote_plus(teams + " result")
-
-            result_link = (
-                f'<a href="https://www.google.com/search?q={search_query}" '
-                f'target="_blank">Check</a>'
-            )
-
-            stats_link = (
-                f'<a href="{stats_url}" target="_blank">Stats</a>'
-                if stats_url else ""
-            )
-
-            if teams and expert_tip:
-                matches.append({
-                    "league": league,
-                    "teams": teams,
-                    "tip": expert_tip,
-                    "ft": ft_result,
-                    "result": result_link,
-                    "stats": stats_link,
-                })
-
-        except Exception as e:
-            print(f"⚠️ Error parsing row: {e}")
+print(f"✅ Scraped {len(matches)} picks")
 
 if not matches:
-    print("❌ No matches scraped from betensured.com. Aborting without posting.")
+    print("❌ No matches scraped from tips180.com. Aborting without posting.")
     raise SystemExit(1)
 
 # ==============================
@@ -276,7 +280,9 @@ if not matches:
 
 analysis_html = "<br><h2>Match Previews & Analysis</h2>"
 
-if GOOGLE_API_KEY and matches:
+analysis_matches = matches[:MAX_ANALYSIS] if MAX_ANALYSIS else matches
+
+if GOOGLE_API_KEY and analysis_matches:
     try:
         import google.genai as genai
 
@@ -284,7 +290,7 @@ if GOOGLE_API_KEY and matches:
 
         matches_text = "\n".join([
             f"{m['teams']} ({m['league']})"
-            for m in matches
+            for m in analysis_matches
         ])
 
         prompt = f"""
@@ -379,7 +385,7 @@ except Exception as e:
 # BUILD HTML
 # ==============================
 
-html = intro_text + """
+post_html = intro_text + """
 <table id="free-tip">
 <thead>
 <tr>
@@ -393,20 +399,20 @@ html = intro_text + """
 """
 
 for m in matches:
-    html += f"""
+    post_html += f"""
 <tr>
-<td>{m['league']}</td>
-<td>{m['teams']}</td>
-<td>{m['tip']}</td>
+<td>{escape(m['league'])}</td>
+<td>{escape(m['teams'])}</td>
+<td>{escape(m['tip'])}</td>
 <td>{m['result']}</td>
 </tr>
 """
 
-html += "</tbody></table>"
-html += analysis_html
+post_html += "</tbody></table>"
+post_html += analysis_html
 
 if links_html:
-    html += f"""
+    post_html += f"""
 <br>
 
 <h3 class="links-per-post">
@@ -426,7 +432,7 @@ class BrowserTransport(xmlrpc.client.SafeTransport):
 
 post_data = {
     "title": f"Soccer predictions today, {formatted_date}",
-    "description": html,
+    "description": post_html,
     "categories": ["Football Predictions"],
 }
 
