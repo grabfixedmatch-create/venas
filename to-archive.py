@@ -1,12 +1,12 @@
 import requests
 import os
-# import time
+import time
 import re
 import random
-# from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from requests.auth import HTTPBasicAuth
-# import cloudscraper
+import cloudscraper
 
 wp_url = "https://grabfixedmatch.com/wp-json/wp/v2/posts"
 post_id = 397
